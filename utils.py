@@ -2,10 +2,11 @@ import numpy as np
 from itertools import product
 
 
+def iterate_by_shift():
+    pass
+
+
 def unfold(x, filter_size):
-    """Extracts sliding local blocks from input tensor"""
-
-
     feature_size, *spatial = x.shape
     unfolded = np.zeros((feature_size, *filter_size, *spatial))
 
