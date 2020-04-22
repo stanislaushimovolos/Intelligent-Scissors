@@ -2,10 +2,6 @@ import numpy as np
 from itertools import product
 
 
-def iterate_by_shift():
-    pass
-
-
 def unfold(x, filter_size):
     feature_size, *spatial = x.shape
     unfolded = np.zeros((feature_size, *filter_size, *spatial))
@@ -33,4 +29,4 @@ def unfold(x, filter_size):
         current_slice = (...,) + tuple(shifts + start_span_coord) + cur_source_span
         unfolded[current_slice] = x[(...,) + cur_shifted_span]
 
-    return unfolded, shift_boundaries
+    return unfolded

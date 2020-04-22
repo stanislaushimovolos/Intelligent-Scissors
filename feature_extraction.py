@@ -28,10 +28,10 @@ class StaticFeatureExtractor:
 
     def get_total_link_costs(self, image):
         l_cost = self.get_laplace_cost(image, self.laplace_kernel_size)
-        l_cost, _ = unfold(l_cost, self.filter_size)
+        l_cost = unfold(l_cost, self.filter_size)
 
         g_cost = self.get_gradient_magnitude_cost(image)
-        g_cost, _ = unfold(g_cost, self.filter_size)
+        g_cost = unfold(g_cost, self.filter_size)
 
         d_cost = self.get_gradient_direction_feats(image)
         total_cost = self.laplace_w * l_cost + self.magnitude_w * g_cost + self.direction_w * d_cost
@@ -53,7 +53,7 @@ class StaticFeatureExtractor:
         return cost
 
     @staticmethod
-    def create_spatial_feats(shape, filter_size):
+    def create_spatial_feats(shape, filter_size, feature_size=2):
         start_span_coord = filter_size // 2
         stop_span_coord = filter_size - start_span_coord - 1
         shift_boundaries = [
@@ -61,26 +61,27 @@ class StaticFeatureExtractor:
             for start_coord, stop_coord in zip(start_span_coord, stop_span_coord)
         ]
 
-        feats = np.zeros(((2,) + (3, 3) + shape))
+        holder = np.zeros((feature_size,) + tuple(filter_size) + shape)
         for shift in product(*shift_boundaries):
-            current_slice = tuple(shift + start_span_coord)
-            feats[:, current_slice[0], current_slice[1]] = np.reshape(shift, (2, 1, 1))
-            if shift != (0, 0):
-                feats[:, current_slice[0], current_slice[1]] /= np.linalg.norm(shift)
-        return feats
+            current_slice = shift + start_span_coord
+            shift = np.reshape(shift, (feature_size,) + (1,) * len(filter_size))
+
+            holder[:, current_slice[0], current_slice[1], ...] = shift
+            if shift.any():
+                holder[:, current_slice[0], current_slice[1], ...] /= np.linalg.norm(shift)
+        return holder
 
     def get_gradient_direction_feats(self, img):
         grads = np.stack([-sobel_h(img), sobel_v(img)])
-        unfolded_grads, _ = unfold(grads, self.filter_size)
+        unfolded_grads = unfold(grads, self.filter_size)
         grads = grads[:, np.newaxis, np.newaxis, ...]
 
         spatial_feats = self.create_spatial_feats(img.shape, self.filter_size)
-        tmp = np.einsum('i..., i...', spatial_feats, grads)
+        link_feats = np.einsum('i..., i...', spatial_feats, grads)
+        local_feats = np.abs(link_feats)
 
-        sign_mask = np.sign(tmp)
-        local_feats = sign_mask * tmp
+        sign_mask = np.sign(link_feats)
         distant_feats = sign_mask * np.einsum('i..., i...', spatial_feats, unfolded_grads)
-
         total_cost = 2 / (3 * np.pi) * (np.arccos(local_feats) + np.arcsin(distant_feats))
         return total_cost
 
