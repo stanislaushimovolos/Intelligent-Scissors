@@ -1,38 +1,40 @@
+import numpy as np
+from functools import partial
 from dijkstar import Graph, find_path
 
 
 class PathFinder:
     def __init__(self, shape, cost):
-        self.graph = self.create_graph(shape, cost)
+        self.shape = shape
+        self.graph, self.map_value = self.create_graph(shape, cost)
 
     def find_path(self, start, stop):
-        start_h, start_w = start
-        stop_h, stop_w = stop
-        path = find_path(self.graph, self.get_edge_id(start_h, start_w), self.get_edge_id(stop_h, stop_w))
-
+        path = find_path(
+            self.graph, self.get_node_from_pos(*start, self.map_value),
+            self.get_node_from_pos(*stop, self.map_value)
+        )
         coord = []
         for node in path.nodes:
-            coord.append(self.get_coords(node))
+            coord.append(self.get_pos_from_node(node, self.map_value))
         return coord
 
-    # TODO do better
     @staticmethod
-    def get_edge_id(h, w):
-        return f'{h}.{w}'
+    def get_node_from_pos(h, w, map_value):
+        return map_value * h + w
 
     @staticmethod
-    def get_coords(node):
-        return node.split('.')
+    def get_pos_from_node(node_id, max_value):
+        return node_id // max_value, node_id % max_value
 
     @staticmethod
     def create_graph(shape, cost):
         h, w = shape
         graph = Graph()
 
-        cost = IndexBasedGraphWrapper(cost)
-        get_id = PathFinder.get_edge_id
+        map_value = np.max(shape) + 1
+        get_id = partial(PathFinder.get_node_from_pos, map_value=map_value)
 
-        # TODO looks very bad (((
+        cost = IndexBasedGraphWrapper(cost)
         for i in range(1, h - 1):
             for j in range(1, w - 1):
                 graph.add_edge(get_id(i, j), get_id(i, j - 1), cost.left[i, j])
@@ -44,7 +46,7 @@ class PathFinder:
                 graph.add_edge(get_id(i, j), get_id(i + 1, j - 1), cost.left_bottom[i, j])
                 graph.add_edge(get_id(i, j), get_id(i - 1, j + 1), cost.right_top[i, j])
 
-        return graph
+        return graph, map_value
 
 
 class IndexBasedGraphWrapper:
