@@ -15,7 +15,7 @@ default_weights = {
 
 
 class StaticFeatureExtractor:
-    def __init__(self, laplace_kernel_size=5, weights=None, connect_area=3):
+    def __init__(self, gaussian_std=2, laplace_kernel_size=5, weights=None, connect_area=3):
         if weights is None:
             weights = default_weights
 
@@ -23,28 +23,29 @@ class StaticFeatureExtractor:
         self.magnitude_w = weights['magnitude']
         self.direction_w = weights['direction']
 
+        self.gaussian_std = gaussian_std
         self.laplace_kernel_size = laplace_kernel_size
         self.filter_size = np.array([connect_area, connect_area])
 
     def get_total_link_costs(self, image):
-        l_cost = self.get_laplace_cost(image, self.laplace_kernel_size)
-        l_cost = unfold(l_cost, self.filter_size)
+        # l_cost = self.get_laplace_cost(image, self.laplace_kernel_size, self.gaussian_std)
+        # l_cost = unfold(l_cost, self.filter_size)
 
-        g_cost = self.get_gradient_magnitude_cost(image)
+        g_cost = self.get_magnitude_cost(image)
         g_cost = unfold(g_cost, self.filter_size)
 
-        d_cost = self.get_gradient_direction_feats(image)
-        total_cost = self.laplace_w * l_cost + self.magnitude_w * g_cost + self.direction_w * d_cost
+        d_cost = self.get_direction_cost(image)
+        total_cost = self.magnitude_w * g_cost + self.direction_w * d_cost
         return total_cost
 
     @staticmethod
-    def get_laplace_cost(img, kernel_size):
-        cost = laplace(img, ksize=kernel_size)
-        cost = np.expand_dims(cost, 0)
-        return cost < 0.1
+    def get_laplace_cost(img, kernel_size, std):
+        laplace_map = laplace(img, ksize=kernel_size)
+
+        return np.abs(laplace_map) > 0.1
 
     @staticmethod
-    def get_gradient_magnitude_cost(image):
+    def get_magnitude_cost(image):
         grads = np.array([sobel_h(image), sobel_v(image)])
         grads = np.transpose(grads, (1, 2, 0))
         norm = np.linalg.norm(grads, axis=2)
@@ -64,17 +65,19 @@ class StaticFeatureExtractor:
         holder = np.zeros((feature_size,) + tuple(filter_size) + shape)
         for shift in product(*shift_boundaries):
             current_slice = shift + start_span_coord
-            shift = np.reshape(shift, (feature_size,) + (1,) * len(filter_size))
+            shift = np.reshape(shift, (feature_size,) + (1,) * 2 * len(filter_size))
 
-            holder[:, current_slice[0], current_slice[1], ...] = shift
+            slices = (slice(None),) + tuple([slice(x, x + 1) for x in current_slice])
+            holder[slices] = shift
             if shift.any():
-                holder[:, current_slice[0], current_slice[1], ...] /= np.linalg.norm(shift)
+                holder[slices] /= np.linalg.norm(shift)
+
         return holder
 
-    def get_gradient_direction_feats(self, img):
+    def get_direction_cost(self, img):
         grads = np.stack([-sobel_h(img), sobel_v(img)])
         unfolded_grads = unfold(grads, self.filter_size)
-        grads = grads[:, np.newaxis, np.newaxis, ...]
+        grads = grads[:, None, None, ...]
 
         spatial_feats = self.create_spatial_feats(img.shape, self.filter_size)
         link_feats = np.einsum('i..., i...', spatial_feats, grads)
@@ -84,6 +87,11 @@ class StaticFeatureExtractor:
         distant_feats = sign_mask * np.einsum('i..., i...', spatial_feats, unfolded_grads)
         total_cost = 2 / (3 * np.pi) * (np.arccos(local_feats) + np.arcsin(distant_feats))
         return total_cost
+
+
+class IndexBasedGraphWrapper:
+    def __init__(self, index_graph):
+        self.index_graph = index_graph
 
 
 class DynamicFeatureExtractor:
