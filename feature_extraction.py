@@ -1,16 +1,13 @@
 import numpy as np
-from dijkstar import Graph
 from itertools import product
 from skimage.filters import gaussian, laplace, sobel_h, sobel_v
 
 from utils import unfold
 
-shifts = [(-1, 1), (-1, 0), (-1, -1), (0, 1), (0, -1), (1, -1), (1, 0), (1, 1)]
-
 default_weights = {
-    'laplace': 0.2,
-    'direction': 0.7,
-    'magnitude': 0.1
+    'laplace': 0.4,
+    'direction': 0.2,
+    'magnitude': 0.4
 }
 
 
@@ -36,7 +33,7 @@ class StaticFeatureExtractor:
 
         d_cost = self.get_direction_cost(image)
         total_cost = self.laplace_w * l_cost + self.magnitude_w * g_cost + self.direction_w * d_cost
-        return total_cost
+        return np.squeeze(total_cost)
 
     @staticmethod
     def get_laplace_cost(image, filter_size, std):
@@ -104,35 +101,6 @@ class StaticFeatureExtractor:
         return total_cost
 
 
-class PixelEdgesWrapper:
-    def __init__(self, pixel_neighbours):
-        self.neighbours = pixel_neighbours
-
-
-class IndexBasedGraphWrapper:
-    def __init__(self, index_graph):
-        self.index_graph = index_graph
-
-
 class DynamicFeatureExtractor:
     def __init__(self):
         pass
-
-
-# TODO remove this trash
-def create_graph(shape, cost):
-    graph = Graph()
-    w, h = shape
-    for i in range(h):
-        for j in range(w):
-            if j != 0:
-                graph.add_edge(f'{i}.{j}', f'{i}.{j - 1}', cost[1, 0, i, j])
-            if j != w - 1:
-                graph.add_edge(f'{i}.{j}', f'{i}.{j + 1}', cost[1, 1, i, j])
-            if i != 0:
-                graph.add_edge(f'{i}.{j}', f'{i - 1}.{j}', cost[0, 1, i, j])
-
-            if i != h - 1:
-                graph.add_edge(f'{i}.{j}', f'{i + 1}.{j}', cost[2, 1, i, j])
-
-    return graph
