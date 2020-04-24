@@ -8,6 +8,7 @@ with open('requirements.txt', encoding='utf-8') as file:
     requirements = file.read().splitlines()
 
 setuptools.setup(
+    include_package_data=True,
     name='intelligent-scissors',
     version=__version__,
     author="Stanislav Shimovolos",
