@@ -35,8 +35,9 @@ class PathFinder:
         get_id = partial(PathFinder.get_node_from_pos, map_value=map_value)
 
         cost = IndexBasedGraphWrapper(cost)
-        for i in range(1, h - 1):
-            for j in range(1, w - 1):
+        for i in range(1, w - 1):
+            for j in range(1, h - 1):
+                #print(123123)
                 graph.add_edge(get_id(i, j), get_id(i, j - 1), cost.left[i, j])
                 graph.add_edge(get_id(i, j), get_id(i, j + 1), cost.right[i, j])
                 graph.add_edge(get_id(i, j), get_id(i - 1, j), cost.top[i, j])

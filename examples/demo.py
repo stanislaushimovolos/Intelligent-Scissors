@@ -42,7 +42,7 @@ class ScissorManager:
 def main(file_name):
     root = Tk()
     image = Image.open(file_name)
-    h, w = image.size
+    w, h = image.size
 
     stage = Canvas(root, bg="black", width=w, height=h)
     tk_image = ImageTk.PhotoImage(image)
