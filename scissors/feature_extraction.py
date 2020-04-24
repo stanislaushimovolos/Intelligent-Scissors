@@ -1,8 +1,7 @@
 import numpy as np
-from itertools import product
 from skimage.filters import gaussian, laplace, sobel_h, sobel_v
 
-from scissors.utils import unfold
+from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, norm_by_max
 
 default_weights = {
     'laplace': 0.4,
@@ -68,33 +67,12 @@ class StaticFeatureExtractor:
         cost = np.expand_dims(cost, 0)
         return cost
 
-    @staticmethod
-    def create_spatial_feats(shape, filter_size, feature_size=2):
-        start_span_coord = filter_size // 2
-        stop_span_coord = filter_size - start_span_coord - 1
-        shift_boundaries = [
-            np.arange(-start_coord, stop_coord + 1)
-            for start_coord, stop_coord in zip(start_span_coord, stop_span_coord)
-        ]
-
-        holder = np.zeros((feature_size,) + tuple(filter_size) + shape)
-        for shift in product(*shift_boundaries):
-            current_slice = shift + start_span_coord
-            shift = np.reshape(shift, (feature_size,) + (1,) * 2 * len(filter_size))
-
-            slices = (slice(None),) + tuple([slice(x, x + 1) for x in current_slice])
-            holder[slices] = shift
-            if shift.any():
-                holder[slices] /= np.linalg.norm(shift)
-
-        return holder
-
     def get_direction_cost(self, img):
         grads = np.stack([-sobel_h(img), sobel_v(img)])
         unfolded_grads = unfold(grads, self.filter_size)
         grads = grads[:, None, None, ...]
 
-        spatial_feats = self.create_spatial_feats(img.shape, self.filter_size)
+        spatial_feats = create_spatial_feats(img.shape, self.filter_size)
         link_feats = np.einsum('i..., i...', spatial_feats, grads)
         local_feats = np.abs(link_feats)
 
@@ -105,5 +83,30 @@ class StaticFeatureExtractor:
 
 
 class DynamicFeatureExtractor:
-    def __init__(self):
-        pass
+    def __init__(self, image, connected_area=3, max_feats_value=255):
+        self.image_feats = norm_by_max(image, max_feats_value)
+        self.filter_size = np.array([connected_area, connected_area])
+
+        grads = np.array([sobel_h(image), sobel_v(image)])
+        grads /= np.linalg.norm(grads)
+        grads = grads[:, None, None, ...]
+
+        unfolded_feats = unfold(np.expand_dims(self.image_feats, 0), self.filter_size)
+        unfolded_feats = flatten_first_dims(np.squeeze(unfolded_feats, 0))
+
+        spatial_feats = create_spatial_feats(image.shape, self.filter_size)
+        dots_products = np.einsum('i..., i...', grads, spatial_feats)
+        dots_products = flatten_first_dims(dots_products)
+
+        self.inner_feats = self.get_inner_feats(unfolded_feats, dots_products)
+        self.outer_feats = self.get_outer_feats(unfolded_feats, dots_products)
+
+    @staticmethod
+    def get_inner_feats(feats, dots_products):
+        indices = np.argmax(dots_products, axis=0).astype(np.int)
+        return np.choose(indices, feats)
+
+    @staticmethod
+    def get_outer_feats(feats, dots_products):
+        indices = np.argmin(dots_products, axis=0).astype(np.int)
+        return np.choose(indices, feats)

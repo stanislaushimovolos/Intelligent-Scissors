@@ -30,3 +30,34 @@ def unfold(x, filter_size):
         unfolded[current_slice] = x[(...,) + cur_shifted_span]
 
     return unfolded
+
+
+def create_spatial_feats(shape, filter_size, feature_size=2):
+    start_span_coord = filter_size // 2
+    stop_span_coord = filter_size - start_span_coord - 1
+    shift_boundaries = [
+        np.arange(-start_coord, stop_coord + 1)
+        for start_coord, stop_coord in zip(start_span_coord, stop_span_coord)
+    ]
+
+    holder = np.zeros((feature_size,) + tuple(filter_size) + shape)
+    for shift in product(*shift_boundaries):
+        current_slice = shift + start_span_coord
+        shift = np.reshape(shift, (feature_size,) + (1,) * 2 * len(filter_size))
+
+        slices = (slice(None),) + tuple([slice(x, x + 1) for x in current_slice])
+        holder[slices] = shift
+        if shift.any():
+            holder[slices] /= np.linalg.norm(shift)
+
+    return holder
+
+
+def flatten_first_dims(x, n_dims=2):
+    shape = x.shape
+    return np.reshape(x, ((np.product(shape[:n_dims]),) + shape[n_dims:]))
+
+
+def norm_by_max(feats, max_val):
+    feats = feats / np.max(feats)
+    return max_val * feats
