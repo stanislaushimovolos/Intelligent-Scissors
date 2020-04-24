@@ -2,7 +2,7 @@ import numpy as np
 from itertools import product
 from skimage.filters import gaussian, laplace, sobel_h, sobel_v
 
-from utils import unfold
+from scissors.utils import unfold
 
 default_weights = {
     'laplace': 0.4,
@@ -23,6 +23,9 @@ class StaticFeatureExtractor:
         self.gaussian_std = gaussian_std
         self.laplace_filter_size = laplace_filter_size
         self.filter_size = np.array([connected_area, connected_area])
+
+    def __call__(self, image):
+        return self.get_total_link_costs(image)
 
     def get_total_link_costs(self, image):
         l_cost = self.get_laplace_cost(image, self.laplace_filter_size, self.gaussian_std)

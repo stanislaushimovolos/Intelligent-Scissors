@@ -1,11 +1,13 @@
-import numpy as np
 import skimage
+import argparse
+import numpy as np
+
 from tkinter import *
 from PIL import ImageTk, Image
 
-from graph import PathFinder
-from feature_extraction import StaticFeatureExtractor
-from gui import Poly, PolyView, PolyController, Pixels, PixelsView
+from scissors.graph import PathFinder
+from scissors.feature_extraction import StaticFeatureExtractor
+from scissors.gui import Poly, PolyView, PolyController, Pixels, PixelsView
 
 
 class ScissorManager:
@@ -14,7 +16,7 @@ class ScissorManager:
         gray_scaled = skimage.color.rgb2gray(np.asarray(image))
 
         self.extractor = StaticFeatureExtractor()
-        self.cost = self.extractor.get_total_link_costs(gray_scaled)
+        self.cost = self.extractor(gray_scaled)
         self.finder = PathFinder(image.size, np.squeeze(self.cost))
 
         self.pixel_model = Pixels(self.canvas)
@@ -37,14 +39,14 @@ class ScissorManager:
             self.pixel_model.add_pixels(coord)
 
 
-def main():
+def main(file_name):
     root = Tk()
-    image = Image.open('392.png')
+    image = Image.open(file_name)
     h, w = image.size
 
     stage = Canvas(root, bg="black", width=w, height=h)
     tk_image = ImageTk.PhotoImage(image)
-    stage.create_image(0, 0, image= tk_image, anchor=NW)
+    stage.create_image(0, 0, image=tk_image, anchor=NW)
 
     scissors = ScissorManager(stage, image)
     stage.bind('<Button-1>', scissors.on_click)
@@ -55,4 +57,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('file_name', help='your name, enter it')
+    args = parser.parse_args()
+
+    main(args.file_name)
