@@ -40,6 +40,7 @@ class View:
         self.fill_color = fill_color
 
         self.image = ImageTk.PhotoImage(image)
+        self.rectangles = []
         self.canvas.create_image(0, 0, image=self.image, anchor=NW)
 
     def update(self):
@@ -48,8 +49,8 @@ class View:
         self.canvas.create_image(0, 0, image=self.image, anchor=NW)
         points = self.model.points
 
-        for previous, current in zip(points, points[1:]):
-            self.canvas.create_line(*previous, *current)
+        # for previous, current in zip(points, points[1:]):
+        #   self.canvas.create_line(*previous, *current, fill=self.fill_color)
 
         for p in points:
             self.canvas.create_oval(
@@ -57,25 +58,10 @@ class View:
                 p[0] + self.radius, p[1] + self.radius,
                 fill=self.fill_color
             )
+        for r in self.rectangles:
+            x, y = r
+            self.canvas.create_rectangle((x, y) * 2, outline="red")
 
     @property
     def canvas(self):
         return self.model.canvas
-
-
-image = Image.open('test_img.jpg')
-width, height = image.size
-
-root = Tk()
-
-stage = Canvas(root, bg="black", height=height, width=width)
-m = Model(stage)
-v = View(m, image=image)
-m.add_view(v)
-
-c = Controller(m)
-stage.bind('<Button-1>', c.on_click)
-stage.pack(expand=YES, fill=BOTH)
-
-root.resizable(False, False)
-root.mainloop()
