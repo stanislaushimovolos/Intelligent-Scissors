@@ -8,3 +8,6 @@ You can learn more about it in papers:
 <p align="center">
   <img width="375" height="440" src="examples/lena.png">
 </p>
+
+## Installation
+`pip install intelligent-scissors`
