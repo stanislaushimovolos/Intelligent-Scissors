@@ -94,33 +94,31 @@ class StaticFeatureExtractor:
 
 
 class DynamicFeatureExtractor:
-    def __init__(self, image, connected_area=3, max_feats_value=255):
-        self.image_feats = norm_by_max(image, max_feats_value)
+    def __init__(self, connected_area=3, n_bins=255):
         self.filter_size = np.array([connected_area, connected_area])
+        self.n_bins = n_bins
+
+    def extract_features(self, image):
+        local_feats = norm_by_max(image, self.n_bins)
 
         grads = np.array([sobel_h(image), sobel_v(image)])
         grads /= np.linalg.norm(grads)
         grads = grads[:, None, None, ...]
 
-        unfolded_feats = unfold(np.expand_dims(self.image_feats, 0), self.filter_size)
+        unfolded_feats = unfold(np.expand_dims(local_feats, 0), self.filter_size)
         unfolded_feats = flatten_first_dims(np.squeeze(unfolded_feats, 0))
 
         spatial_feats = create_spatial_feats(image.shape, self.filter_size)
         dots_products = np.einsum('i..., i...', grads, spatial_feats)
         dots_products = flatten_first_dims(dots_products)
 
-        # TODO add weights
-        self.inner_feats = self.get_inner_feats(unfolded_feats, dots_products)
-        self.outer_feats = self.get_outer_feats(unfolded_feats, dots_products)
+        inner_feats = self.get_inner_feats(unfolded_feats, dots_products)
+        outer_feats = self.get_outer_feats(unfolded_feats, dots_products)
 
-        self.inner_feats = np.ceil(self.inner_feats)
-        self.outer_feats = np.ceil(self.outer_feats)
-        self.image_feats = np.ceil(self.image_feats)
-
-    @staticmethod
-    def create_histogram(series, max_value):
-        freq, bins = np.histogram(series, np.arange(max_value))
-        return freq
+        inner_feats = np.ceil(inner_feats)
+        outer_feats = np.ceil(outer_feats)
+        local_feats = np.ceil(local_feats)
+        return local_feats, inner_feats, outer_feats
 
     @staticmethod
     def get_inner_feats(feats, dots_products):
@@ -134,29 +132,45 @@ class DynamicFeatureExtractor:
 
 
 class DynamicFeaturesProcessor:
-    def __init__(self, local_feats, inner_feats, outer_feats, params=None, train_segment_size=64, std=3, n_bins=255):
+    def __init__(self, local_feats, inner_feats, outer_feats, params=None, connected_area=3, train_segment_size=64,
+                 std=3, n_bins=256):
         if params is None:
             params = default_params
 
         self.maximum_cost = params['maximum_cost']
-        self.inner_weight = params['inner']
-        self.outer_weight = params['outer']
-        self.local_weight = params['local']
+        self.inner_weight = self.maximum_cost * params['inner']
+        self.outer_weight = self.maximum_cost * params['outer']
+        self.local_weight = self.maximum_cost * params['local']
 
         self.n_bins = n_bins
         self.smooth_sigma = std
-        self.length = train_segment_size
+        self.filter_size = np.array([connected_area, connected_area])
 
-        self.local_feats = local_feats
-        self.inner_feats = inner_feats
-        self.outer_feats = outer_feats
+        self.local_feats = local_feats.astype(int)
+        self.inner_feats = inner_feats.astype(int)
+        self.outer_feats = outer_feats.astype(int)
+        self.n_bins = n_bins
 
-    def process_series(self, series):
-        hist = np.zeros(self.length)
+    def compute_dynamic_cost(self, series):
+        local_hist = self.get_hist(series, self.local_feats, self.n_bins, self.smooth_sigma, self.local_weight)
+        inner_hist = self.get_hist(series, self.inner_feats, self.n_bins, self.smooth_sigma, self.inner_weight)
+        outer_hist = self.get_hist(series, self.outer_feats, self.n_bins, self.smooth_sigma, self.outer_weight)
 
+        local_cost = local_hist[self.local_feats]
+        inner_cost = inner_hist[self.inner_feats]
+        outer_cost = outer_hist[self.outer_feats]
+        total_cost = local_cost + inner_cost + outer_cost
+        total_cost = unfold(np.expand_dims(total_cost, 0), self.filter_size)
+        return np.squeeze(total_cost, 0)
+
+    @staticmethod
+    def get_hist(series, feats_mapper, n_bins, sigma, multiplier):
+        hist = np.zeros(n_bins)
+
+        # TODO weighted function
         for i, idx in enumerate(series):
-            hist[self.inner_feats(idx)] += 1
+            hist[feats_mapper[idx]] += 1
 
-        hist = gaussian_filter1d(hist, self.smooth_sigma)
-        feats = np.ceil(self.maximum_cost * self.local_feats * (1 - hist / np.max(hist)))
+        hist = gaussian_filter1d(hist, sigma)
+        hist = np.ceil(multiplier * (1 - hist / np.max(hist)))
         return hist
