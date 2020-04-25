@@ -1,43 +1,47 @@
 import numpy as np
-from functools import partial
 from dijkstar import Graph, find_path
 
 
 class PathFinder:
     def __init__(self, shape, cost):
         self.shape = shape
-        self.graph, self.map_value = self.create_graph(shape, cost)
+        self.map_value = None
+        self.graph = self.create_graph(shape, cost)
 
-    def find_path(self, start, stop):
-        path = find_path(
-            self.graph, self.get_node_from_pos(*start, self.map_value),
-            self.get_node_from_pos(*stop, self.map_value)
-        )
+    def find_path(self, start, stop, cost_func=None):
+        if cost_func is None:
+            path = find_path(
+                self.graph, self.get_node_from_pos(*start),
+                self.get_node_from_pos(*stop)
+            )
+        else:
+            path = find_path(
+                self.graph, self.get_node_from_pos(*start),
+                self.get_node_from_pos(*stop),
+                cost_func=cost_func
+            )
         coord = []
         for node in path.nodes:
-            coord.append(self.get_pos_from_node(node, self.map_value))
+            coord.append(self.get_pos_from_node(node))
         return coord
 
-    @staticmethod
-    def get_node_from_pos(h, w, map_value):
-        return map_value * h + w
+    def get_node_from_pos(self, h, w):
+        return self.map_value * h + w
 
-    @staticmethod
-    def get_pos_from_node(node_id, max_value):
-        return node_id // max_value, node_id % max_value
+    def get_pos_from_node(self, node_id):
+        return node_id // self.map_value, node_id % self.map_value
 
-    @staticmethod
-    def create_graph(shape, cost):
+    def create_graph(self, shape, cost):
         h, w = shape
         graph = Graph()
 
         map_value = np.max(shape) + 1
-        get_id = partial(PathFinder.get_node_from_pos, map_value=map_value)
+        self.map_value = map_value
+        get_id = self.get_node_from_pos
 
         cost = IndexBasedGraphWrapper(cost)
         for i in range(1, w - 1):
             for j in range(1, h - 1):
-                #print(123123)
                 graph.add_edge(get_id(i, j), get_id(i, j - 1), cost.left[i, j])
                 graph.add_edge(get_id(i, j), get_id(i, j + 1), cost.right[i, j])
                 graph.add_edge(get_id(i, j), get_id(i - 1, j), cost.top[i, j])
@@ -47,7 +51,7 @@ class PathFinder:
                 graph.add_edge(get_id(i, j), get_id(i + 1, j - 1), cost.left_bottom[i, j])
                 graph.add_edge(get_id(i, j), get_id(i - 1, j + 1), cost.right_top[i, j])
 
-        return graph, map_value
+        return graph
 
 
 class IndexBasedGraphWrapper:

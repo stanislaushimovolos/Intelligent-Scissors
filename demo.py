@@ -6,7 +6,7 @@ from tkinter import *
 from PIL import ImageTk, Image
 
 from scissors.graph import PathFinder
-from scissors.feature_extraction import StaticFeatureExtractor
+from scissors.feature_extraction import StaticFeatureExtractor, DynamicFeatureExtractor, DynamicFeaturesProcessor
 from scissors.gui import Poly, PolyView, PolyController, Pixels, PixelsView
 
 
@@ -15,9 +15,10 @@ class ScissorManager:
         self.canvas = canvas
         gray_scaled = skimage.color.rgb2gray(np.asarray(image))
 
-        self.extractor = StaticFeatureExtractor()
-        self.cost = self.extractor(gray_scaled)
-        self.finder = PathFinder(image.size, np.squeeze(self.cost))
+        self.static_extractor = StaticFeatureExtractor()
+        self.static_cost = self.static_extractor(gray_scaled)
+
+        self.finder = PathFinder(image.size, np.squeeze(self.static_cost))
 
         self.pixel_model = Pixels(self.canvas)
         self.pixel_view = PixelsView(self.pixel_model)
@@ -30,12 +31,33 @@ class ScissorManager:
         self.c = PolyController(self.poly_model)
         self.clicks = []
 
+        self.dynamic_extractor = DynamicFeatureExtractor()
+        dynamic_features = self.dynamic_extractor.extract_features(gray_scaled)
+        self.processor = DynamicFeaturesProcessor(*dynamic_features)
+
+        self.last_pixels = None
+        self.dynamic_cost = None
+
+    def graph_cost_function(self, u, v, edge, prev_edge):
+        dynamic_cost = self.dynamic_cost[self.finder.get_pos_from_node(v)]
+        return edge + dynamic_cost
+
     def on_click(self, event):
         self.clicks.append((event.x, event.y))
         self.c.on_click(event)
         if len(self.clicks) > 1:
-            coord = self.finder.find_path(np.flip(self.clicks[-2]), (np.flip(self.clicks[-1])))
+            prev_click = np.flip(self.clicks[-2])
+            cur_click = np.flip(self.clicks[-1])
+
+            cost_func = None
+            if self.last_pixels is not None:
+                self.dynamic_cost = self.processor.compute_dynamic_cost(self.last_pixels)
+                cost_func = self.graph_cost_function
+
+            coord = self.finder.find_path(prev_click, cur_click, cost_func)
             coord = [np.flip(cor) for cor in coord]
+
+            self.last_pixels = coord
             self.pixel_model.add_pixels(coord)
 
 

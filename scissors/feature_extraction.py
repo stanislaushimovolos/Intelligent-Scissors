@@ -10,7 +10,7 @@ default_params = {
     'local': 0.1,
     'inner': 0.1,
     'outer': 0.1,
-    'maximum_cost': 2048,
+    'maximum_cost': 4096,
 }
 
 
@@ -160,8 +160,7 @@ class DynamicFeaturesProcessor:
         inner_cost = inner_hist[self.inner_feats]
         outer_cost = outer_hist[self.outer_feats]
         total_cost = local_cost + inner_cost + outer_cost
-        total_cost = unfold(np.expand_dims(total_cost, 0), self.filter_size)
-        return np.squeeze(total_cost, 0)
+        return total_cost
 
     @staticmethod
     def get_hist(series, feats_mapper, n_bins, sigma, multiplier):
