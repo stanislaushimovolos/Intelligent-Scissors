@@ -1,7 +1,8 @@
 import numpy as np
-from skimage.filters import gaussian, laplace, sobel_h, sobel_v
 from scipy.ndimage.filters import gaussian_filter1d
-from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, norm_by_max
+from skimage.filters import gaussian, laplace, sobel_h, sobel_v
+
+from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, norm_by_max_value
 
 default_params = {
     'laplace': 0.3,
@@ -14,19 +15,20 @@ default_params = {
 }
 
 
-class StaticFeatureExtractor:
-    def __init__(self, gaussian_std=2, laplace_filter_size=5, params=None, connected_area=3):
+class StaticExtractor:
+    def __init__(self, std=2, laplace_filter_size=5, params=None, filter_size=3):
         if params is None:
             params = default_params
 
+        # TODO replace by default params
         self.laplace_w = params['laplace']
         self.magnitude_w = params['magnitude']
         self.direction_w = params['direction']
         self.maximum_cost = params['maximum_cost']
 
-        self.gaussian_std = gaussian_std
+        self.gaussian_std = std
         self.laplace_filter_size = laplace_filter_size
-        self.filter_size = np.array([connected_area, connected_area])
+        self.filter_size = np.array([filter_size, filter_size])
 
     def __call__(self, image):
         return self.get_total_link_costs(image)
@@ -93,15 +95,17 @@ class StaticFeatureExtractor:
         return total_cost
 
 
-class DynamicFeatureExtractor:
-    def __init__(self, connected_area=3, n_bins=255):
-        self.filter_size = np.array([connected_area, connected_area])
-        self.n_bins = n_bins
+class DynamicExtractor:
+    def __init__(self, filter_size=3, n_values=255):
+        self.filter_size = np.array([filter_size, filter_size])
+        self.n_values = n_values
 
     def extract_features(self, image):
-        local_feats = norm_by_max(image, self.n_bins)
+        local_feats = norm_by_max_value(image, self.n_values)
 
         grads = np.array([sobel_h(image), sobel_v(image)])
+
+        # TODO check
         grads /= np.linalg.norm(grads)
         grads = grads[:, None, None, ...]
 
@@ -115,9 +119,9 @@ class DynamicFeatureExtractor:
         inner_feats = self.get_inner_feats(unfolded_feats, dots_products)
         outer_feats = self.get_outer_feats(unfolded_feats, dots_products)
 
-        inner_feats = np.ceil(inner_feats)
-        outer_feats = np.ceil(outer_feats)
-        local_feats = np.ceil(local_feats)
+        inner_feats = np.clip(np.ceil(inner_feats), 0, self.n_values - 1)
+        outer_feats = np.clip(np.ceil(outer_feats), 0, self.n_values - 1)
+        local_feats = np.clip(np.ceil(local_feats), 0, self.n_values - 1)
         return local_feats, inner_feats, outer_feats
 
     @staticmethod
@@ -131,30 +135,29 @@ class DynamicFeatureExtractor:
         return np.choose(indices, feats)
 
 
-class DynamicFeaturesProcessor:
-    def __init__(self, local_feats, inner_feats, outer_feats, params=None, connected_area=3, train_segment_size=64,
-                 std=3, n_bins=256):
+class CostProcessor:
+    def __init__(self, local_feats, inner_feats, outer_feats, params=None, filter_size=3, std=3, n_values=255):
         if params is None:
             params = default_params
 
+        # TODO replace by default params
         self.maximum_cost = params['maximum_cost']
         self.inner_weight = self.maximum_cost * params['inner']
         self.outer_weight = self.maximum_cost * params['outer']
         self.local_weight = self.maximum_cost * params['local']
 
-        self.n_bins = n_bins
-        self.smooth_sigma = std
-        self.filter_size = np.array([connected_area, connected_area])
+        self.std = std
+        self.n_values = n_values
+        self.filter_size = np.array([filter_size, filter_size])
 
-        self.local_feats = local_feats.astype(int)
-        self.inner_feats = inner_feats.astype(int)
-        self.outer_feats = outer_feats.astype(int)
-        self.n_bins = n_bins
+        self.local_feats = local_feats.astype(np.int)
+        self.inner_feats = inner_feats.astype(np.int)
+        self.outer_feats = outer_feats.astype(np.int)
 
-    def compute_dynamic_cost(self, series):
-        local_hist = self.get_hist(series, self.local_feats, self.n_bins, self.smooth_sigma, self.local_weight)
-        inner_hist = self.get_hist(series, self.inner_feats, self.n_bins, self.smooth_sigma, self.inner_weight)
-        outer_hist = self.get_hist(series, self.outer_feats, self.n_bins, self.smooth_sigma, self.outer_weight)
+    def compute(self, series):
+        local_hist = self.get_hist(series, self.local_feats, self.local_weight)
+        inner_hist = self.get_hist(series, self.inner_feats, self.inner_weight)
+        outer_hist = self.get_hist(series, self.outer_feats, self.outer_weight)
 
         local_cost = local_hist[self.local_feats]
         inner_cost = inner_hist[self.inner_feats]
@@ -162,14 +165,42 @@ class DynamicFeaturesProcessor:
         total_cost = local_cost + inner_cost + outer_cost
         return total_cost
 
-    @staticmethod
-    def get_hist(series, feats_mapper, n_bins, sigma, multiplier):
-        hist = np.zeros(n_bins)
+    def get_hist(self, series, feats, weight):
+        hist = np.zeros(self.n_values)
 
         # TODO weighted function
         for i, idx in enumerate(series):
-            hist[feats_mapper[idx]] += 1
+            hist[feats[idx]] += 1
 
-        hist = gaussian_filter1d(hist, sigma)
-        hist = np.ceil(multiplier * (1 - hist / np.max(hist)))
+        hist = gaussian_filter1d(hist, self.std)
+        hist = np.ceil(weight * (1 - hist / np.max(hist)))
         return hist
+
+
+class Scissors:
+    def __init__(self, static_cost, dynamic_feats, finder, use_dynamic_feats=True):
+        self.use_dynamic_feats = use_dynamic_feats
+        self.static_cost = static_cost
+        self.path_finder = finder
+
+        # TODO use DI
+        self.processor = CostProcessor(*dynamic_feats)
+        self.current_dynamic_cost = None
+        self.processed_pixels = None
+
+    def get_dynamic_cost(self, u, v, edge, prev_edge):
+        dynamic_addition = 0
+        if self.current_dynamic_cost is not None:
+            dynamic_addition = self.current_dynamic_cost[self.path_finder.get_pos_from_node(v)]
+        return edge + dynamic_addition
+
+    def find_path(self, seed_point, free_point):
+        if self.processed_pixels is not None:
+            self.current_dynamic_cost = self.processor.compute(self.processed_pixels)
+
+        path = self.path_finder.find_path(seed_point, free_point, self.get_dynamic_cost)
+        path = [np.flip(cor) for cor in path]
+
+        # TODO place by deque/circular buffer
+        self.processed_pixels = path
+        return path

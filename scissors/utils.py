@@ -58,6 +58,10 @@ def flatten_first_dims(x, n_dims=2):
     return np.reshape(x, ((np.product(shape[:n_dims]),) + shape[n_dims:]))
 
 
-def norm_by_max(feats, max_val):
+def norm_by_max_value(feats, max_val):
     feats = feats / np.max(feats)
     return max_val * feats
+
+
+def get_static_cost(u, v, edge, prev_edge):
+    return edge
