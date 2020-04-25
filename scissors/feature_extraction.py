@@ -1,23 +1,28 @@
 import numpy as np
 from skimage.filters import gaussian, laplace, sobel_h, sobel_v
-
+from scipy.ndimage.filters import gaussian_filter1d
 from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, norm_by_max
 
-default_weights = {
-    'laplace': 0.4,
-    'direction': 0.2,
-    'magnitude': 0.4
+default_params = {
+    'laplace': 0.3,
+    'direction': 0.1,
+    'magnitude': 0.3,
+    'local': 0.1,
+    'inner': 0.1,
+    'outer': 0.1,
+    'maximum_cost': 2048,
 }
 
 
 class StaticFeatureExtractor:
-    def __init__(self, gaussian_std=2, laplace_filter_size=5, weights=None, connected_area=3):
-        if weights is None:
-            weights = default_weights
+    def __init__(self, gaussian_std=2, laplace_filter_size=5, params=None, connected_area=3):
+        if params is None:
+            params = default_params
 
-        self.laplace_w = weights['laplace']
-        self.magnitude_w = weights['magnitude']
-        self.direction_w = weights['direction']
+        self.laplace_w = params['laplace']
+        self.magnitude_w = params['magnitude']
+        self.direction_w = params['direction']
+        self.maximum_cost = params['maximum_cost']
 
         self.gaussian_std = gaussian_std
         self.laplace_filter_size = laplace_filter_size
@@ -29,12 +34,15 @@ class StaticFeatureExtractor:
     def get_total_link_costs(self, image):
         l_cost = self.get_laplace_cost(image, self.laplace_filter_size, self.gaussian_std)
         l_cost = unfold(l_cost, self.filter_size)
+        l_cost = np.ceil(self.laplace_w * self.maximum_cost * l_cost)
 
         g_cost = self.get_magnitude_cost(image)
         g_cost = unfold(g_cost, self.filter_size)
+        g_cost = np.ceil(self.magnitude_w * self.maximum_cost * g_cost)
 
         d_cost = self.get_direction_cost(image)
-        total_cost = self.laplace_w * l_cost + self.magnitude_w * g_cost + self.direction_w * d_cost
+        d_cost = np.ceil(self.direction_w * self.maximum_cost * d_cost)
+        total_cost = l_cost + g_cost + d_cost
         return np.squeeze(total_cost)
 
     @staticmethod
@@ -67,8 +75,11 @@ class StaticFeatureExtractor:
         cost = np.expand_dims(cost, 0)
         return cost
 
-    def get_direction_cost(self, img):
+    def get_direction_cost(self, img, eps=1e-5):
+        # TODO new check
         grads = np.stack([-sobel_h(img), sobel_v(img)])
+        grads /= np.linalg.norm(grads, axis=0) + eps
+
         unfolded_grads = unfold(grads, self.filter_size)
         grads = grads[:, None, None, ...]
 
@@ -78,7 +89,7 @@ class StaticFeatureExtractor:
 
         sign_mask = np.sign(link_feats)
         distant_feats = sign_mask * np.einsum('i..., i...', spatial_feats, unfolded_grads)
-        total_cost = 2 / (3 * np.pi) * (np.arccos(local_feats) + np.arcsin(distant_feats))
+        total_cost = 2 / (3 * np.pi) * (np.arccos(local_feats) + np.arccos(distant_feats))
         return total_cost
 
 
@@ -98,8 +109,18 @@ class DynamicFeatureExtractor:
         dots_products = np.einsum('i..., i...', grads, spatial_feats)
         dots_products = flatten_first_dims(dots_products)
 
+        # TODO add weights
         self.inner_feats = self.get_inner_feats(unfolded_feats, dots_products)
         self.outer_feats = self.get_outer_feats(unfolded_feats, dots_products)
+
+        self.inner_feats = np.ceil(self.inner_feats)
+        self.outer_feats = np.ceil(self.outer_feats)
+        self.image_feats = np.ceil(self.image_feats)
+
+    @staticmethod
+    def create_histogram(series, max_value):
+        freq, bins = np.histogram(series, np.arange(max_value))
+        return freq
 
     @staticmethod
     def get_inner_feats(feats, dots_products):
@@ -110,3 +131,32 @@ class DynamicFeatureExtractor:
     def get_outer_feats(feats, dots_products):
         indices = np.argmin(dots_products, axis=0).astype(np.int)
         return np.choose(indices, feats)
+
+
+class DynamicFeaturesProcessor:
+    def __init__(self, local_feats, inner_feats, outer_feats, params=None, train_segment_size=64, std=3, n_bins=255):
+        if params is None:
+            params = default_params
+
+        self.maximum_cost = params['maximum_cost']
+        self.inner_weight = params['inner']
+        self.outer_weight = params['outer']
+        self.local_weight = params['local']
+
+        self.n_bins = n_bins
+        self.smooth_sigma = std
+        self.length = train_segment_size
+
+        self.local_feats = local_feats
+        self.inner_feats = inner_feats
+        self.outer_feats = outer_feats
+
+    def process_series(self, series):
+        hist = np.zeros(self.length)
+
+        for i, idx in enumerate(series):
+            hist[self.inner_feats(idx)] += 1
+
+        hist = gaussian_filter1d(hist, self.smooth_sigma)
+        feats = np.ceil(self.maximum_cost * self.local_feats * (1 - hist / np.max(hist)))
+        return hist
