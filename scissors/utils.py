@@ -65,3 +65,15 @@ def norm_by_max_value(feats, max_val):
 
 def get_static_cost(u, v, edge, prev_edge):
     return edge
+
+
+def get_node_from_pos(h, w, index_key):
+    return index_key * h + w
+
+
+def get_pos_from_node(node_id, index_key):
+    return node_id // index_key, node_id % index_key
+
+
+def quadratic_kernel(x, size):
+    return 1 - (x / size) ** 2

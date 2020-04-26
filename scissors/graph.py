@@ -1,40 +1,35 @@
 import numpy as np
+from functools import partial
 from dijkstar import Graph, find_path
 
-from scissors.utils import get_static_cost
+from scissors.utils import get_static_cost, get_pos_from_node, get_node_from_pos
 
 
 class PathFinder:
     def __init__(self, shape, cost):
         self.shape = shape
-        self.index_key = np.max(shape) + 1
+        self.index_key = np.max(shape) + 2
         self.graph = self.create_graph(shape, cost)
 
     def find_path(self, start, stop, cost_func=get_static_cost):
         path = find_path(
-            self.graph, self.get_node_from_pos(*start),
-            self.get_node_from_pos(*stop),
+            self.graph, get_node_from_pos(*start, self.index_key),
+            get_node_from_pos(*stop, self.index_key),
             cost_func=cost_func
         )
         coord = []
         for node in path.nodes:
-            coord.append(self.get_pos_from_node(node))
+            coord.append(get_pos_from_node(node, self.index_key))
         return coord
 
-    def get_node_from_pos(self, h, w):
-        return self.index_key * h + w
-
-    def get_pos_from_node(self, node_id):
-        return node_id // self.index_key, node_id % self.index_key
-
     def create_graph(self, shape, cost):
-        h, w = shape
+        w, h = shape
         graph = Graph()
-        get_id = self.get_node_from_pos
+        get_id = partial(get_node_from_pos, index_key=self.index_key)
 
         cost = IndexBasedGraphWrapper(cost)
-        for i in range(1, w - 1):
-            for j in range(1, h - 1):
+        for i in range(1, h - 1):
+            for j in range(1, w - 1):
                 graph.add_edge(get_id(i, j), get_id(i, j - 1), cost.left[i, j])
                 graph.add_edge(get_id(i, j), get_id(i, j + 1), cost.right[i, j])
                 graph.add_edge(get_id(i, j), get_id(i - 1, j), cost.top[i, j])

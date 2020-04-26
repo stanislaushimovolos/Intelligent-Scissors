@@ -33,6 +33,7 @@ class GuiManager:
 
         if self.prev_click is not None:
             path = self.scissors.find_path(self.prev_click, self.cur_click)
+            path = [np.flip(x) for x in path]
             self.pixel_model.add_pixels(path)
 
 
@@ -46,7 +47,7 @@ def main(file_name):
     finder = PathFinder(image.size, np.squeeze(static_cost))
 
     dynamic_extractor = DynamicExtractor()
-    dynamic_features = dynamic_extractor.extract_features(gray_scaled)
+    dynamic_features = dynamic_extractor(gray_scaled)
     scissors = Scissors(static_cost, dynamic_features, finder)
 
     root = Tk()

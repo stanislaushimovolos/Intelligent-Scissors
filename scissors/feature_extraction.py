@@ -1,8 +1,10 @@
 import numpy as np
+from collections import deque
 from scipy.ndimage.filters import gaussian_filter1d
 from skimage.filters import gaussian, laplace, sobel_h, sobel_v
 
-from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, norm_by_max_value
+from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, norm_by_max_value, get_pos_from_node, \
+    quadratic_kernel
 
 default_params = {
     'laplace': 0.3,
@@ -11,41 +13,50 @@ default_params = {
     'local': 0.1,
     'inner': 0.1,
     'outer': 0.1,
-    'maximum_cost': 4096,
+    'maximum_cost': 8192,
 }
 
 
 class StaticExtractor:
-    def __init__(self, std=2, laplace_filter_size=5, params=None, filter_size=3):
-        if params is None:
-            params = default_params
+    def __init__(self, std=2, laplace_ksize=5, filter_size=3, laplace_w=None, magnitude_w=None, direction_w=None,
+                 maximum_cost=None):
+        if laplace_w is None:
+            laplace_w = default_params['laplace']
 
-        # TODO replace by default params
-        self.laplace_w = params['laplace']
-        self.magnitude_w = params['magnitude']
-        self.direction_w = params['direction']
-        self.maximum_cost = params['maximum_cost']
+        if magnitude_w is None:
+            magnitude_w = default_params['magnitude']
 
-        self.gaussian_std = std
-        self.laplace_filter_size = laplace_filter_size
+        if direction_w is None:
+            direction_w = default_params['direction']
+
+        if maximum_cost is None:
+            maximum_cost = default_params['maximum_cost']
+
+        self.laplace_w = laplace_w * maximum_cost
+        self.magnitude_w = magnitude_w * maximum_cost
+        self.direction_w = direction_w * maximum_cost
+        self.maximum_cost = maximum_cost * maximum_cost
+
+        self.std = std
+        self.laplace_ksize = laplace_ksize
         self.filter_size = np.array([filter_size, filter_size])
 
     def __call__(self, image):
         return self.get_total_link_costs(image)
 
     def get_total_link_costs(self, image):
-        l_cost = self.get_laplace_cost(image, self.laplace_filter_size, self.gaussian_std)
+        l_cost = self.get_laplace_cost(image, self.laplace_ksize, self.std)
         l_cost = unfold(l_cost, self.filter_size)
-        l_cost = np.ceil(self.laplace_w * self.maximum_cost * l_cost)
+        l_cost = np.ceil(self.laplace_w * l_cost)
 
         g_cost = self.get_magnitude_cost(image)
         g_cost = unfold(g_cost, self.filter_size)
-        g_cost = np.ceil(self.magnitude_w * self.maximum_cost * g_cost)
+        g_cost = np.ceil(self.magnitude_w * g_cost)
 
         d_cost = self.get_direction_cost(image)
-        d_cost = np.ceil(self.direction_w * self.maximum_cost * d_cost)
-        total_cost = l_cost + g_cost + d_cost
-        return np.squeeze(total_cost)
+        d_cost = np.ceil(self.direction_w * d_cost)
+        total_cost = np.squeeze(l_cost + g_cost + d_cost)
+        return total_cost
 
     @staticmethod
     def get_laplace_cost(image, filter_size, std):
@@ -100,6 +111,9 @@ class DynamicExtractor:
         self.filter_size = np.array([filter_size, filter_size])
         self.n_values = n_values
 
+    def __call__(self, image):
+        return self.extract_features(image)
+
     def extract_features(self, image):
         local_feats = norm_by_max_value(image, self.n_values)
 
@@ -136,15 +150,23 @@ class DynamicExtractor:
 
 
 class CostProcessor:
-    def __init__(self, local_feats, inner_feats, outer_feats, params=None, filter_size=3, std=3, n_values=255):
-        if params is None:
-            params = default_params
+    def __init__(self, local_feats, inner_feats, outer_feats, filter_size=3, std=3, n_values=255, maximum_cost=None,
+                 inner_w=None, outer_w=None, local_w=None):
+        if maximum_cost is None:
+            maximum_cost = default_params['maximum_cost']
 
-        # TODO replace by default params
-        self.maximum_cost = params['maximum_cost']
-        self.inner_weight = self.maximum_cost * params['inner']
-        self.outer_weight = self.maximum_cost * params['outer']
-        self.local_weight = self.maximum_cost * params['local']
+        if inner_w is None:
+            inner_w = default_params['inner']
+
+        if outer_w is None:
+            outer_w = default_params['outer']
+
+        if local_w is None:
+            local_w = default_params['local']
+
+        self.inner_weight = maximum_cost * inner_w
+        self.outer_weight = maximum_cost * outer_w
+        self.local_weight = maximum_cost * local_w
 
         self.std = std
         self.n_values = n_values
@@ -168,9 +190,8 @@ class CostProcessor:
     def get_hist(self, series, feats, weight):
         hist = np.zeros(self.n_values)
 
-        # TODO weighted function
         for i, idx in enumerate(series):
-            hist[feats[idx]] += 1
+            hist[feats[idx]] += quadratic_kernel(i, len(series))
 
         hist = gaussian_filter1d(hist, self.std)
         hist = np.ceil(weight * (1 - hist / np.max(hist)))
@@ -178,29 +199,26 @@ class CostProcessor:
 
 
 class Scissors:
-    def __init__(self, static_cost, dynamic_feats, finder, use_dynamic_feats=True):
-        self.use_dynamic_feats = use_dynamic_feats
-        self.static_cost = static_cost
+    def __init__(self, static_cost, dynamic_feats, finder, capacity=32):
+        self.capacity = capacity
         self.path_finder = finder
+        self.static_cost = static_cost
 
-        # TODO use DI
-        self.processor = CostProcessor(*dynamic_feats)
         self.current_dynamic_cost = None
-        self.processed_pixels = None
+        self.processor = CostProcessor(*dynamic_feats)
+        self.processed_pixels = deque(maxlen=self.capacity)
 
     def get_dynamic_cost(self, u, v, edge, prev_edge):
         dynamic_addition = 0
         if self.current_dynamic_cost is not None:
-            dynamic_addition = self.current_dynamic_cost[self.path_finder.get_pos_from_node(v)]
+            index = get_pos_from_node(v, self.path_finder.index_key)
+            dynamic_addition = self.current_dynamic_cost[index]
         return edge + dynamic_addition
 
     def find_path(self, seed_point, free_point):
-        if self.processed_pixels is not None:
+        if len(self.processed_pixels) != 0:
             self.current_dynamic_cost = self.processor.compute(self.processed_pixels)
 
         path = self.path_finder.find_path(seed_point, free_point, self.get_dynamic_cost)
-        path = [np.flip(cor) for cor in path]
-
-        # TODO place by deque/circular buffer
-        self.processed_pixels = path
+        self.processed_pixels.extend(path)
         return path
