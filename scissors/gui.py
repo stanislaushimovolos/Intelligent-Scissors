@@ -1,3 +1,6 @@
+import numpy as np
+
+
 class Model:
     def __init__(self, canvas):
         self.canvas = canvas
@@ -56,7 +59,7 @@ class PolyController:
 
 
 class PixelsView(View):
-    def __init__(self, model, fill_color="red"):
+    def __init__(self, model, fill_color="blue"):
         super().__init__(model)
         self.fill_color = fill_color
 
@@ -69,7 +72,7 @@ class PixelsView(View):
 
 
 class PolyView(View):
-    def __init__(self, model, draw_lines=False, fill_color="red", radius=3):
+    def __init__(self, model, draw_lines=False, fill_color="green", radius=3):
         super().__init__(model)
 
         self.radius = radius
@@ -89,3 +92,31 @@ class PolyView(View):
                 p[0] + self.radius, p[1] + self.radius,
                 fill=self.fill_color
             )
+
+
+class GuiManager:
+    def __init__(self, canvas, scissors):
+        self.canvas = canvas
+        self.scissors = scissors
+
+        self.pixel_model = Pixels(self.canvas)
+        self.pixel_view = PixelsView(self.pixel_model)
+        self.pixel_model.add_view(self.pixel_view)
+
+        self.poly_model = Poly(self.canvas)
+        self.poly_view = PolyView(self.poly_model)
+        self.poly_model.add_view(self.poly_view)
+
+        self.c = PolyController(self.poly_model)
+        self.prev_click = None
+        self.cur_click = None
+
+    def on_click(self, e):
+        self.prev_click = self.cur_click
+        self.cur_click = np.flip((e.x, e.y))
+        self.c.on_click(e)
+
+        if self.prev_click is not None:
+            path = self.scissors.find_path(self.prev_click, self.cur_click)
+            path = [np.flip(x) for x in path]
+            self.pixel_model.add_pixels(path)

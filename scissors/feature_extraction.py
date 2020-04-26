@@ -7,13 +7,13 @@ from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, nor
     quadratic_kernel
 
 default_params = {
-    'laplace': 0.4,
-    'direction': 0.3,
-    'magnitude': 0.4,
-    'local': 0.1,
-    'inner': 0.1,
-    'outer': 0.1,
-    'maximum_cost': 8192,
+    'laplace': 0.22,
+    'direction': 0.23,
+    'magnitude': 0.22,
+    'local': 0.11,
+    'inner': 0.11,
+    'outer': 0.11,
+    'maximum_cost': 16384,
 }
 
 
@@ -143,7 +143,7 @@ class DynamicExtractor:
 
 
 class CostProcessor:
-    def __init__(self, local_feats, inner_feats, outer_feats, filter_size=3, std=3, n_values=255, maximum_cost=None,
+    def __init__(self, local_feats, inner_feats, outer_feats, filter_size=3, std=5, n_values=255, maximum_cost=None,
                  inner_w=None, outer_w=None, local_w=None):
         if maximum_cost is None:
             maximum_cost = default_params['maximum_cost']
@@ -157,8 +157,8 @@ class CostProcessor:
         if local_w is None:
             local_w = default_params['local']
 
-        self.inner_weight = maximum_cost * inner_w
-        self.outer_weight = maximum_cost * outer_w
+        self.inner_weight = inner_w * maximum_cost
+        self.outer_weight = outer_w * maximum_cost
         self.local_weight = maximum_cost * local_w
 
         self.std = std
@@ -180,11 +180,11 @@ class CostProcessor:
         total_cost = local_cost + inner_cost + outer_cost
         return total_cost
 
-    def get_hist(self, series, feats, weight):
+    def get_hist(self, series, feats, weight, smooth=quadratic_kernel):
         hist = np.zeros(self.n_values)
 
         for i, idx in enumerate(series):
-            hist[feats[idx]] += quadratic_kernel(i, len(series))
+            hist[feats[idx]] += smooth(i, len(series))
 
         hist = gaussian_filter1d(hist, self.std)
         hist = np.ceil(weight * (1 - hist / np.max(hist)))

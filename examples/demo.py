@@ -4,37 +4,9 @@ import numpy as np
 from tkinter import *
 from PIL import ImageTk, Image
 
+from scissors.gui import GuiManager
 from scissors.graph import PathFinder
-from scissors.gui import Poly, PolyView, PolyController, Pixels, PixelsView
 from scissors.feature_extraction import StaticExtractor, DynamicExtractor, Scissors
-
-
-class GuiManager:
-    def __init__(self, canvas, scissors):
-        self.canvas = canvas
-        self.scissors = scissors
-
-        self.pixel_model = Pixels(self.canvas)
-        self.pixel_view = PixelsView(self.pixel_model)
-        self.pixel_model.add_view(self.pixel_view)
-
-        self.poly_model = Poly(self.canvas)
-        self.poly_view = PolyView(self.poly_model)
-        self.poly_model.add_view(self.poly_view)
-
-        self.c = PolyController(self.poly_model)
-        self.prev_click = None
-        self.cur_click = None
-
-    def on_click(self, e):
-        self.prev_click = self.cur_click
-        self.cur_click = np.flip((e.x, e.y))
-        self.c.on_click(e)
-
-        if self.prev_click is not None:
-            path = self.scissors.find_path(self.prev_click, self.cur_click)
-            path = [np.flip(x) for x in path]
-            self.pixel_model.add_pixels(path)
 
 
 def main(file_name):
@@ -44,7 +16,7 @@ def main(file_name):
 
     static_extractor = StaticExtractor()
     static_cost = static_extractor(gray_scaled)
-    finder = PathFinder(image.size, np.squeeze(static_cost))
+    finder = PathFinder(image.size, static_cost)
 
     dynamic_extractor = DynamicExtractor()
     dynamic_features = dynamic_extractor(gray_scaled)
