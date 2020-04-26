@@ -1,15 +1,15 @@
 import numpy as np
 from collections import deque
 from scipy.ndimage.filters import gaussian_filter1d
-from skimage.filters import gaussian, laplace, sobel_h, sobel_v
+from skimage.filters import gaussian, laplace, sobel_h, sobel_v, sobel
 
 from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, norm_by_max_value, get_pos_from_node, \
     quadratic_kernel
 
 default_params = {
-    'laplace': 0.3,
-    'direction': 0.1,
-    'magnitude': 0.3,
+    'laplace': 0.4,
+    'direction': 0.3,
+    'magnitude': 0.4,
     'local': 0.1,
     'inner': 0.1,
     'outer': 0.1,
@@ -18,7 +18,8 @@ default_params = {
 
 
 class StaticExtractor:
-    def __init__(self, std=2, laplace_ksize=5, filter_size=3, laplace_w=None, magnitude_w=None, direction_w=None,
+    def __init__(self, laplace_kernel_sz=3, gaussian_std=4, filter_size=3, laplace_w=None, magnitude_w=None,
+                 direction_w=None,
                  maximum_cost=None):
         if laplace_w is None:
             laplace_w = default_params['laplace']
@@ -35,17 +36,16 @@ class StaticExtractor:
         self.laplace_w = laplace_w * maximum_cost
         self.magnitude_w = magnitude_w * maximum_cost
         self.direction_w = direction_w * maximum_cost
-        self.maximum_cost = maximum_cost * maximum_cost
 
-        self.std = std
-        self.laplace_ksize = laplace_ksize
+        self.gaussian_std = gaussian_std
+        self.laplace_kernel_sz = laplace_kernel_sz
         self.filter_size = np.array([filter_size, filter_size])
 
     def __call__(self, image):
         return self.get_total_link_costs(image)
 
     def get_total_link_costs(self, image):
-        l_cost = self.get_laplace_cost(image, self.laplace_ksize, self.std)
+        l_cost = self.get_laplace_cost(image, self.laplace_kernel_sz, self.gaussian_std)
         l_cost = unfold(l_cost, self.filter_size)
         l_cost = np.ceil(self.laplace_w * l_cost)
 
@@ -59,44 +59,39 @@ class StaticExtractor:
         return total_cost
 
     @staticmethod
-    def get_laplace_cost(image, filter_size, std):
+    def get_laplace_cost(image, laplace_kernel_sz, gaussian_std):
+        # TODO add several kernels
         output = np.ones_like(image)
-        blurred = gaussian(image, std)
-        laplace_map = laplace(blurred, ksize=filter_size)
+        blurred = gaussian(image, gaussian_std)
+        laplace_map = laplace(blurred, ksize=laplace_kernel_sz)
 
-        unfolded_laplace = unfold(
+        unfolded_map = unfold(
             np.expand_dims(laplace_map, 0),
-            np.array([filter_size, filter_size])
+            np.array([laplace_kernel_sz, laplace_kernel_sz])
         )
-        unfolded_laplace = np.reshape(
-            unfolded_laplace, (filter_size * filter_size,) + laplace_map.shape
-        )
-        n_positive = np.sum(unfolded_laplace >= 0, axis=0)
-        n_negative = np.sum(unfolded_laplace < 0, axis=0)
+        unfolded_map = flatten_first_dims(np.squeeze(unfolded_map))
+        n_positive = np.sum(unfolded_map >= 0, axis=0)
+        n_negative = np.sum(unfolded_map < 0, axis=0)
 
-        # TODO check minimum value
         zero_crossing_mask = ((n_negative > 0) & (n_positive > 0))
         output[zero_crossing_mask] = 0
         return np.expand_dims(output, 0)
 
     @staticmethod
     def get_magnitude_cost(image):
-        grads = np.array([sobel_h(image), sobel_v(image)])
-        grads = np.transpose(grads, (1, 2, 0))
-        norm = np.linalg.norm(grads, axis=2)
-        cost = 1 - norm / np.max(norm)
+        grads = sobel(image)
+        cost = 1 - grads / np.max(grads)
         cost = np.expand_dims(cost, 0)
         return cost
 
-    def get_direction_cost(self, img, eps=1e-5):
-        # TODO new check
-        grads = np.stack([-sobel_h(img), sobel_v(img)])
-        grads /= np.linalg.norm(grads, axis=0) + eps
+    def get_direction_cost(self, image, eps=1e-6):
+        grads = np.stack([sobel_v(image), -sobel_h(image)])
+        grads /= (np.linalg.norm(grads, axis=0) + eps)
 
         unfolded_grads = unfold(grads, self.filter_size)
         grads = grads[:, None, None, ...]
 
-        spatial_feats = create_spatial_feats(img.shape, self.filter_size)
+        spatial_feats = create_spatial_feats(image.shape, self.filter_size)
         link_feats = np.einsum('i..., i...', spatial_feats, grads)
         local_feats = np.abs(link_feats)
 
@@ -107,35 +102,33 @@ class StaticExtractor:
 
 
 class DynamicExtractor:
-    def __init__(self, filter_size=3, n_values=255):
+    def __init__(self, filter_size=5, n_values=255):
         self.filter_size = np.array([filter_size, filter_size])
         self.n_values = n_values
 
     def __call__(self, image):
         return self.extract_features(image)
 
-    def extract_features(self, image):
+    def extract_features(self, image, eps=1e-6):
         local_feats = norm_by_max_value(image, self.n_values)
 
-        grads = np.array([sobel_h(image), sobel_v(image)])
-
-        # TODO check
-        grads /= np.linalg.norm(grads)
+        grads = -np.array([sobel_h(image), sobel_v(image)])
+        grads /= (np.linalg.norm(grads) + eps)
         grads = grads[:, None, None, ...]
-
-        unfolded_feats = unfold(np.expand_dims(local_feats, 0), self.filter_size)
-        unfolded_feats = flatten_first_dims(np.squeeze(unfolded_feats, 0))
 
         spatial_feats = create_spatial_feats(image.shape, self.filter_size)
         dots_products = np.einsum('i..., i...', grads, spatial_feats)
         dots_products = flatten_first_dims(dots_products)
 
+        unfolded_feats = unfold(np.expand_dims(local_feats, 0), self.filter_size)
+        unfolded_feats = flatten_first_dims(np.squeeze(unfolded_feats, 0))
+
         inner_feats = self.get_inner_feats(unfolded_feats, dots_products)
         outer_feats = self.get_outer_feats(unfolded_feats, dots_products)
 
-        inner_feats = np.clip(np.ceil(inner_feats), 0, self.n_values - 1)
-        outer_feats = np.clip(np.ceil(outer_feats), 0, self.n_values - 1)
-        local_feats = np.clip(np.ceil(local_feats), 0, self.n_values - 1)
+        inner_feats = np.clip(np.ceil(inner_feats), 0, self.n_values - 1).astype(int)
+        outer_feats = np.clip(np.ceil(outer_feats), 0, self.n_values - 1).astype(int)
+        local_feats = np.clip(np.ceil(local_feats), 0, self.n_values - 1).astype(int)
         return local_feats, inner_feats, outer_feats
 
     @staticmethod
@@ -172,9 +165,9 @@ class CostProcessor:
         self.n_values = n_values
         self.filter_size = np.array([filter_size, filter_size])
 
-        self.local_feats = local_feats.astype(np.int)
-        self.inner_feats = inner_feats.astype(np.int)
-        self.outer_feats = outer_feats.astype(np.int)
+        self.local_feats = local_feats
+        self.inner_feats = inner_feats
+        self.outer_feats = outer_feats
 
     def compute(self, series):
         local_hist = self.get_hist(series, self.local_feats, self.local_weight)
