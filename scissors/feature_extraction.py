@@ -7,20 +7,37 @@ from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, nor
     quadratic_kernel
 
 default_params = {
-    'laplace': 0.22,
-    'direction': 0.23,
-    'magnitude': 0.22,
-    'local': 0.11,
-    'inner': 0.11,
-    'outer': 0.11,
+    'laplace': 0.3,
+    'direction': 0.2,
+    'magnitude': 0.2,
+    'local': 0.1,
+    'inner': 0.1,
+    'outer': 0.1,
     'maximum_cost': 16384,
 }
 
 
 class StaticExtractor:
-    def __init__(self, laplace_kernel_sz=3, gaussian_std=4, filter_size=3, laplace_w=None, magnitude_w=None,
-                 direction_w=None,
-                 maximum_cost=None):
+    def __init__(self, laplace_kernel_size=3, gaussian_std=4, laplace_w=None, magnitude_w=None,
+                 direction_w=None, maximum_cost=None):
+        """
+        Class for computing static features.
+
+        Parameters
+        ----------
+        laplace_kernel_size : int
+            defines the size of the laplace kernel
+        gaussian_std : float
+            standard deviation for gaussian kernel.
+        laplace_w : float
+            weight of laplacian zero-crossing  features
+        magnitude_w : float
+            weight of gradient magnitude features
+        direction_w : float
+            weight of gradient direction features
+        maximum_cost : float
+           specifies the largest possible integer cost
+        """
         if laplace_w is None:
             laplace_w = default_params['laplace']
 
@@ -38,8 +55,8 @@ class StaticExtractor:
         self.direction_w = direction_w * maximum_cost
 
         self.gaussian_std = gaussian_std
-        self.laplace_kernel_sz = laplace_kernel_sz
-        self.filter_size = np.array([filter_size, filter_size])
+        self.laplace_kernel_sz = laplace_kernel_size
+        self.filter_size = np.array([3, 3])
 
     def __call__(self, image):
         return self.get_total_link_costs(image)
@@ -102,9 +119,17 @@ class StaticExtractor:
 
 
 class DynamicExtractor:
-    def __init__(self, filter_size=5, n_values=255):
-        self.filter_size = np.array([filter_size, filter_size])
-        self.n_values = n_values
+    def __init__(self, n_image_values=255):
+        """
+        Class for computing dynamic features.
+
+        Parameters
+        ----------
+        n_image_values : int
+            defines a possible range of values of dynamic features
+        """
+        self.n_values = n_image_values
+        self.filter_size = np.array([3, 3])
 
     def __call__(self, image):
         return self.extract_features(image)
@@ -143,8 +168,32 @@ class DynamicExtractor:
 
 
 class CostProcessor:
-    def __init__(self, local_feats, inner_feats, outer_feats, filter_size=3, std=5, n_values=255, maximum_cost=None,
-                 inner_w=None, outer_w=None, local_w=None):
+    def __init__(self, local_feats, inner_feats, outer_feats, gaussian_std=5, n_image_values=255,
+                 inner_w=None, outer_w=None, local_w=None, maximum_cost=None):
+        """
+        Class for computing dynamic features histograms.
+
+        Parameters
+        ----------
+        local_feats : np.array
+            intensity of image pixels
+        inner_feats : np.array
+            intensity of neighboring pixels in the direction of the gradient
+        outer_feats : np.array
+            intensity of neighboring pixels in the opposite direction to the gradient
+        gaussian_std : float
+            standard deviation of gaussian kernel used for smoothing dynamic histograms
+        n_image_values : int
+            defines a possible range of values of dynamic features
+        inner_w : float
+            weight of inner features
+        outer_w : float
+            weight of outer features
+        local_w : float
+            weight of local features
+        maximum_cost : int
+            specifies the largest possible integer cost
+        """
         if maximum_cost is None:
             maximum_cost = default_params['maximum_cost']
 
@@ -161,13 +210,14 @@ class CostProcessor:
         self.outer_weight = outer_w * maximum_cost
         self.local_weight = maximum_cost * local_w
 
-        self.std = std
-        self.n_values = n_values
-        self.filter_size = np.array([filter_size, filter_size])
+        self.std = gaussian_std
+        self.n_values = n_image_values
 
         self.local_feats = local_feats
         self.inner_feats = inner_feats
         self.outer_feats = outer_feats
+
+        self.filter_size = np.array([3, 3])
 
     def compute(self, series):
         local_hist = self.get_hist(series, self.local_feats, self.local_weight)
@@ -193,6 +243,17 @@ class CostProcessor:
 
 class Scissors:
     def __init__(self, static_cost, dynamic_feats, finder, capacity=32):
+        """
+        Parameters
+        ----------
+        static_cost : np.array
+            array of shape (3, 3, height, width)
+        dynamic_feats : np.array
+            array of shape (height, width)
+        finder : PathFinder
+        capacity : int
+            number of last pixels used for dynamic cost calculation
+        """
         self.capacity = capacity
         self.path_finder = finder
         self.static_cost = static_cost
