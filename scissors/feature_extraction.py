@@ -13,7 +13,7 @@ default_params = {
     'local': 0.1,
     'inner': 0.1,
     'outer': 0.1,
-    'maximum_cost': 16384,
+    'maximum_cost': 256,
 }
 
 
@@ -50,6 +50,7 @@ class StaticExtractor:
         if maximum_cost is None:
             maximum_cost = default_params['maximum_cost']
 
+        self.maximum_cost = maximum_cost
         self.laplace_w = laplace_w * maximum_cost
         self.magnitude_w = magnitude_w * maximum_cost
         self.direction_w = direction_w * maximum_cost

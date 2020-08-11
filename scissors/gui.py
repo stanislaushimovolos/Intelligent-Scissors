@@ -135,7 +135,7 @@ def run_demo(file_name):
 
     static_extractor = StaticExtractor()
     static_cost = static_extractor(gray_scaled)
-    finder = PathFinder(image.size, static_cost)
+    finder = PathFinder(static_cost, static_extractor.maximum_cost)
 
     dynamic_extractor = DynamicExtractor()
     dynamic_features = dynamic_extractor(gray_scaled)
