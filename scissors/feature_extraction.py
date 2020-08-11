@@ -13,7 +13,7 @@ default_params = {
     'local': 0.1,
     'inner': 0.1,
     'outer': 0.1,
-    'maximum_cost': 256,
+    'maximum_cost': 512,
 }
 
 
