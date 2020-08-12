@@ -1,5 +1,5 @@
 import numpy as np
-from .search import search
+from scissors.search import search
 import time
 
 
@@ -24,5 +24,5 @@ class PathFinder:
             history.append((cur_y, cur_x))
             cur_x, cur_y =  node_map[:, cur_x, cur_y]
 
-        #print(time.time() - start)
+        # print(time.time() - start)
         return history
