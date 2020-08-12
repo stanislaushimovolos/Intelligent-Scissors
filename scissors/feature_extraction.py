@@ -13,7 +13,7 @@ default_params = {
     'local': 0.1,
     'inner': 0.1,
     'outer': 0.1,
-    'maximum_cost': 512,
+    'maximum_cost': 1024,
 }
 
 
@@ -270,10 +270,10 @@ class Scissors:
             dynamic_addition = self.current_dynamic_cost[index]
         return edge + dynamic_addition
 
-    def find_path(self, seed_point, free_point):
+    def find_path(self, seed_x, seed_y,  free_x, free_y):
         if len(self.processed_pixels) != 0:
             self.current_dynamic_cost = self.processor.compute(self.processed_pixels)
 
-        path = self.path_finder.find_path(seed_point, free_point, self.get_dynamic_cost)
+        path = self.path_finder.find_path(seed_x, seed_y,  free_x, free_y, self.get_dynamic_cost)
         self.processed_pixels.extend(path)
         return path

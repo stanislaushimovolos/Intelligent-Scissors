@@ -123,7 +123,10 @@ class GuiManager:
         self.c.on_click(e)
 
         if self.prev_click is not None:
-            path = self.scissors.find_path(self.prev_click, self.cur_click)
+            seed_y, seed_x = self.prev_click
+            free_y, free_x = self.cur_click
+
+            path = self.scissors.find_path(seed_x, seed_y, free_x, free_y)
             path = [np.flip(x) for x in path]
             self.pixel_model.add_pixels(path)
 
