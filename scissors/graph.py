@@ -1,5 +1,5 @@
 import numpy as np
-from scissors.search import search
+from .search import search
 import time
 
 
