@@ -33,7 +33,9 @@ cdef vector[vector[Node]]* make_node_storage(int w, int h):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def search(long [:, :, :, :]local_cost, int w, int h, int seed_x, int seed_y, int maximum_local_cost):
+def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
+            int w, int h, int seed_x, int seed_y, int maximum_local_cost):
+
     # keeps information about all pixels
     cdef vector[vector[Node]]* raw_storage = make_node_storage(w, h)
     cdef Node* seed_point = get_node_ptr(seed_x, seed_y, raw_storage)
@@ -104,7 +106,8 @@ def search(long [:, :, :, :]local_cost, int w, int h, int seed_x, int seed_y, in
                 continue
 
             # compute cumulative cost to neighbour
-            tmp_cost = p[0].total_cost + local_cost[y_shift + 1, x_shift + 1, p_y, p_x]
+            # TODO fix axes order
+            tmp_cost = p[0].total_cost + static_cost[y_shift + 1, x_shift + 1, p_y, p_x] + dynamic_cost[q_y, q_x]
 
             if q[0].active and (q[0].has_infinite_cost or tmp_cost < q[0].total_cost):
                 # remove higher cost neighbor

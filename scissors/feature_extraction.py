@@ -3,8 +3,7 @@ from collections import deque
 from scipy.ndimage.filters import gaussian_filter1d
 from skimage.filters import gaussian, laplace, sobel_h, sobel_v, sobel
 
-from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, norm_by_max_value, get_pos_from_node, \
-    quadratic_kernel
+from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, norm_by_max_value, quadratic_kernel
 
 default_params = {
     'laplace': 0.3,
@@ -209,7 +208,7 @@ class CostProcessor:
 
         self.inner_weight = inner_w * maximum_cost
         self.outer_weight = outer_w * maximum_cost
-        self.local_weight = maximum_cost * local_w
+        self.local_weight = local_w * maximum_cost
 
         self.std = gaussian_std
         self.n_values = n_image_values
@@ -228,7 +227,7 @@ class CostProcessor:
         local_cost = local_hist[self.local_feats]
         inner_cost = inner_hist[self.inner_feats]
         outer_cost = outer_hist[self.outer_feats]
-        total_cost = local_cost + inner_cost + outer_cost
+        total_cost = (local_cost + inner_cost + outer_cost).astype(np.int)
         return total_cost
 
     def get_hist(self, series, feats, weight, smooth=quadratic_kernel):
@@ -243,7 +242,7 @@ class CostProcessor:
 
 
 class Scissors:
-    def __init__(self, static_cost, dynamic_feats, finder, capacity=32):
+    def __init__(self, static_cost, dynamic_feats, finder, capacity=64):
         """
         Parameters
         ----------
@@ -263,17 +262,10 @@ class Scissors:
         self.processor = CostProcessor(*dynamic_feats)
         self.processed_pixels = deque(maxlen=self.capacity)
 
-    def get_dynamic_cost(self, u, v, edge, prev_edge):
-        dynamic_addition = 0
-        if self.current_dynamic_cost is not None:
-            index = get_pos_from_node(v, self.path_finder.index_key)
-            dynamic_addition = self.current_dynamic_cost[index]
-        return edge + dynamic_addition
-
-    def find_path(self, seed_x, seed_y,  free_x, free_y):
+    def find_path(self, seed_x, seed_y, free_x, free_y):
         if len(self.processed_pixels) != 0:
             self.current_dynamic_cost = self.processor.compute(self.processed_pixels)
 
-        path = self.path_finder.find_path(seed_x, seed_y,  free_x, free_y, self.get_dynamic_cost)
+        path = self.path_finder.find_path(seed_x, seed_y, free_x, free_y, self.current_dynamic_cost)
         self.processed_pixels.extend(path)
         return path
