@@ -1,13 +1,13 @@
 import setuptools
 from scissors import __version__
 
-from Cython.Build import cythonize
 from Cython.Distutils import build_ext
+import numpy as np
 
 extensions = [
-    setuptools.Extension("scissors.search", ["scissors/search.pyx"]),
+    setuptools.Extension("scissors.search", ["scissors/search.pyx"],
+                         include_dirs=[np.get_include()],  language='c++'),
 ]
-cmdclass = {'build_ext': build_ext}
 
 with open('README.md', 'r') as fh:
     long_description = fh.read()
@@ -27,7 +27,7 @@ setuptools.setup(
     license='MIT',
     url='https://github.com/stanislaushimovolos/Intelligent-Scissors',
     download_url='https://github.com/stanislaushimovolos/Intelligent-Scissors/v%s.tar.gz' % __version__,
-    packages=setuptools.find_packages(),
+    packages=['scissors'],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
@@ -35,6 +35,7 @@ setuptools.setup(
     ],
     install_requires=requirements,
     python_requires='>=3.5',
-    cmdclass=cmdclass,
-    ext_modules=cythonize(extensions),
+    cmdclass={'build_ext': build_ext},
+    ext_modules=extensions,
+    package_data={'scissors': ['*.pyx']},
 )
