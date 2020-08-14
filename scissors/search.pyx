@@ -81,10 +81,10 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
     # seed has 0 cost
     set_cost(seed_point, 0)
     # create active list
-    cdef vector[List] active_list = vector[List](maximum_local_cost, List(0, NULL))
+    cdef vector[List]* active_list = new vector[List](maximum_local_cost, List(0, NULL))
     # put seed point to the first bucket
     cdef int list_index = 0
-    list_push(seed_point, &active_list[list_index])
+    list_push(seed_point, &active_list[0][list_index])
 
     # next node x and next node y, current x, current y
     cdef long [:, :, :] next_node_map = np.zeros((2, w, h), dtype=np.int)
@@ -106,10 +106,11 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
 
     # shift indices of neighbors
     cdef int x_shift = 0, y_shift = 0
-    cdef list shifts = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+    # [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+    cdef vector[int] y_shifts = [-1, -1, -1, 0, 0, 1, 1, 1]
+    cdef vector[int] x_shifts = [-1, 0, 1, -1, 1, -1, 0, 1]
 
     # while there are unexpanded points
-
     while num_of_active_lists != 0:
         last_expanded_cost -= 1
 
@@ -117,10 +118,10 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
             last_expanded_cost += 1
             list_index = last_expanded_cost % maximum_local_cost
 
-            if active_list[list_index].size != 0:
+            if active_list[0][list_index].size != 0:
                 break
 
-        p = list_pop(&active_list[list_index])
+        p = list_pop(&active_list[0][list_index])
         p_x = p[0].x
         p_y = p[0].y
         #p = get_node_ptr(p_x, p_y, raw_storage)
@@ -130,11 +131,14 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
         last_expanded_cost = p[0].total_cost
 
         # reduce number of active buckets
-        if active_list[list_index].size == 0:
+        if active_list[0][list_index].size == 0:
             num_of_active_lists -= 1
 
         # for each neighbour
-        for y_shift, x_shift in shifts:
+        for i in range(8):
+            x_shift = x_shifts[i]
+            y_shift = y_shifts[i]
+
             if p_y == 0 and y_shift == -1:
                 continue
             elif p_y == h - 1 and y_shift == 1:
@@ -162,10 +166,10 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
             if q[0].active and (q[0].has_infinite_cost or tmp_cost < q[0].total_cost):
                 # remove higher cost neighbor
                 list_index = q[0].total_cost % maximum_local_cost
-                list_remove_node(q, &active_list[list_index])
+                list_remove_node(q, &active_list[0][list_index])
 
                  # reduce number of active buckets
-                if active_list[list_index].size == 0:
+                if active_list[0][list_index].size == 0:
                     num_of_active_lists -= 1
 
             # if neighbour not in list
@@ -174,15 +178,16 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
                 set_cost(q, tmp_cost)
                 # place node to the active list
                 list_index = q[0].total_cost % maximum_local_cost
-                list_push(q, &active_list[list_index])
+                list_push(q, &active_list[0][list_index])
 
                 # set back pointer
                 next_node_map[0, q_x, q_y] = p_x
                 next_node_map[1, q_x, q_y] = p_y
 
                 # increase number of active buckets
-                if active_list[list_index].size == 1:
+                if active_list[0][list_index].size == 1:
                     num_of_active_lists += 1
 
     del raw_storage
+    del active_list
     return next_node_map
