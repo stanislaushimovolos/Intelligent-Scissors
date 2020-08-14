@@ -3,31 +3,69 @@ import cython
 import numpy as np
 from libcpp.vector cimport vector
 
-from cpython cimport array
-import array
-
 # keeps information about pixel (x, y)
 cdef struct Node:
+    int x
+    int y
     int active
     int expanded
 
     int total_cost
     int has_infinite_cost
 
+    Node* next
+    Node* prev
+
+cdef struct List:
+    int size
+    Node* tail
+
+cdef void list_push(Node* node, List* lst):
+    if lst[0].tail != NULL:
+        lst[0].tail[0].next = node
+        node[0].prev = lst[0].tail
+
+    lst[0].tail = node
+    node[0].active = True
+    lst[0].size+=1
+
+cdef void list_remove_node(Node* node, List* lst):
+    if node == lst[0].tail:
+        if node[0].prev != NULL:
+            node[0].prev[0].next = NULL
+            lst[0].tail = node[0].prev
+        else:
+            lst[0].tail = NULL
+
+    elif node[0].prev == NULL:
+        node[0].next[0].prev = NULL
+    else:
+        node[0].prev[0].next = node[0].next
+        node[0].next[0].prev = node[0].prev
+
+    node[0].next = NULL
+    node[0].prev = NULL
+
+    node[0].active = False
+    lst[0].size-=1
+
+cdef Node * list_pop(List* lst):
+    cdef Node* tail = lst[0].tail
+    list_remove_node(tail, lst)
+    return tail
 
 cdef Node* get_node_ptr(int x, int y, vector[vector[Node]]* storage):
-    return &storage[0][x][y]
+    cdef Node* node = &storage[0][x][y]
+    node[0].x = x
+    node[0].y = y
+    return node
 
 cdef void set_cost(Node* n, long cost):
     n[0].total_cost = cost
     n[0].has_infinite_cost = False
 
-cdef void toggle_activation(Node* n):
-    n[0].active = ~n[0].active
-
 cdef vector[vector[Node]]* make_node_storage(int w, int h):
-    return new vector[vector[Node]](w, vector[Node](h, Node(False, False, 0, True)))
-
+    return new vector[vector[Node]](w, vector[Node](h, Node(0, 0, False, False, 0, True, NULL, NULL)))
 
 
 @cython.boundscheck(False)
@@ -43,10 +81,10 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
     # seed has 0 cost
     set_cost(seed_point, 0)
     # create active list
-    cdef list active_list = [[] for _ in range(maximum_local_cost)]
+    cdef vector[List] active_list = vector[List](maximum_local_cost, List(0, NULL))
     # put seed point to the first bucket
     cdef int list_index = 0
-    active_list[list_index].append((seed_x, seed_y))
+    list_push(seed_point, &active_list[list_index])
 
     # next node x and next node y, current x, current y
     cdef long [:, :, :] next_node_map = np.zeros((2, w, h), dtype=np.int)
@@ -71,6 +109,7 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
     cdef list shifts = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
     # while there are unexpanded points
+
     while num_of_active_lists != 0:
         last_expanded_cost -= 1
 
@@ -78,18 +117,20 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
             last_expanded_cost += 1
             list_index = last_expanded_cost % maximum_local_cost
 
-            if len(active_list[list_index]) != 0:
+            if active_list[list_index].size != 0:
                 break
 
-        p_x, p_y = active_list[list_index].pop()
-        p = get_node_ptr(p_x, p_y, raw_storage)
+        p = list_pop(&active_list[list_index])
+        p_x = p[0].x
+        p_y = p[0].y
+        #p = get_node_ptr(p_x, p_y, raw_storage)
 
         # mark 'p' as expanded
         p[0].expanded = True
         last_expanded_cost = p[0].total_cost
 
         # reduce number of active buckets
-        if len(active_list[list_index]) == 0:
+        if active_list[list_index].size == 0:
             num_of_active_lists -= 1
 
         # for each neighbour
@@ -114,16 +155,17 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
 
             # compute cumulative cost to neighbour
             # TODO fix axes order
-            tmp_cost = p[0].total_cost + static_cost[y_shift + 1, x_shift + 1, p_y, p_x] + dynamic_cost[q_y, q_x]
+            tmp_cost = p[0].total_cost + static_cost[y_shift + 1, x_shift + 1, p_y, p_x]
+            # TODO smth wrong with dynamic features
+            # tmp_cost += dynamic_cost[q_y, q_x]
 
             if q[0].active and (q[0].has_infinite_cost or tmp_cost < q[0].total_cost):
                 # remove higher cost neighbor
                 list_index = q[0].total_cost % maximum_local_cost
-                active_list[list_index].remove((q_x, q_y))
-                toggle_activation(q)
+                list_remove_node(q, &active_list[list_index])
 
                  # reduce number of active buckets
-                if len(active_list[list_index]) == 0:
+                if active_list[list_index].size == 0:
                     num_of_active_lists -= 1
 
             # if neighbour not in list
@@ -132,15 +174,14 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
                 set_cost(q, tmp_cost)
                 # place node to the active list
                 list_index = q[0].total_cost % maximum_local_cost
-                active_list[list_index].append((q_x, q_y))
-                toggle_activation(q)
+                list_push(q, &active_list[list_index])
 
                 # set back pointer
                 next_node_map[0, q_x, q_y] = p_x
                 next_node_map[1, q_x, q_y] = p_y
 
                 # increase number of active buckets
-                if len(active_list[list_index]) == 1:
+                if active_list[list_index].size == 1:
                     num_of_active_lists += 1
 
     del raw_storage

@@ -7,8 +7,8 @@ from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, nor
 
 default_params = {
     'laplace': 0.3,
-    'direction': 0.2,
-    'magnitude': 0.2,
+    'direction': 0.1,
+    'magnitude': 0.3,
     'local': 0.1,
     'inner': 0.1,
     'outer': 0.1,
