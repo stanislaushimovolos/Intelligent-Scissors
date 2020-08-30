@@ -1,9 +1,13 @@
 import numpy as np
+from typing import Sequence, Union
 from itertools import product
 
 
-def unfold(x, filter_size):
+def unfold(x: np.array, filter_size: Union[int, np.array]):
     feature_size, *spatial = x.shape
+    if isinstance(filter_size, int):
+        filter_size = np.array((filter_size,) * len(spatial))
+
     unfolded = np.zeros((feature_size, *filter_size, *spatial))
 
     def get_spans(shift):
@@ -32,7 +36,10 @@ def unfold(x, filter_size):
     return unfolded
 
 
-def create_spatial_feats(shape, filter_size, feature_size=2):
+def create_spatial_feats(shape: Sequence[int], filter_size: Union[int, np.array], feature_size: int = 2):
+    if isinstance(filter_size, int):
+        filter_size = np.array((filter_size,) * len(shape))
+
     start_span_coord = filter_size // 2
     stop_span_coord = filter_size - start_span_coord - 1
     shift_boundaries = [

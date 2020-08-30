@@ -65,11 +65,11 @@ class StaticExtractor:
 
     def get_total_link_costs(self, image: np.array):
         l_cost = self.get_laplace_cost(image, self.laplace_kernels, self.gaussian_kernels, self.laplace_weights)
-        l_cost = unfold(l_cost, np.array([3, 3]))
+        l_cost = unfold(l_cost, 3)
         l_cost = np.ceil(self.laplace_w * l_cost)
 
         g_cost = self.get_magnitude_cost(image)
-        g_cost = unfold(g_cost, np.array([3, 3]))
+        g_cost = unfold(g_cost, 3)
         g_cost = np.ceil(self.magnitude_w * g_cost)
 
         d_cost = self.get_direction_cost(image)
@@ -112,10 +112,10 @@ class StaticExtractor:
         grads = np.stack([sobel_v(image), -sobel_h(image)])
         grads /= (np.linalg.norm(grads, axis=0) + eps)
 
-        unfolded_grads = unfold(grads, np.array([3, 3]))
+        unfolded_grads = unfold(grads, 3)
         grads = grads[:, None, None, ...]
 
-        spatial_feats = create_spatial_feats(image.shape, np.array([3, 3]))
+        spatial_feats = create_spatial_feats(image.shape, 3)
         link_feats = np.einsum('i..., i...', spatial_feats, grads)
         local_feats = np.abs(link_feats)
 
@@ -136,7 +136,6 @@ class DynamicExtractor:
             defines a possible range of values of dynamic features
         """
         self.n_values = n_image_values
-        self.filter_size = np.array([3, 3])
 
     def __call__(self, image):
         return self.extract_features(image)
@@ -148,11 +147,11 @@ class DynamicExtractor:
         grads /= (np.linalg.norm(grads) + eps)
         grads = grads[:, None, None, ...]
 
-        spatial_feats = create_spatial_feats(image.shape, self.filter_size)
+        spatial_feats = create_spatial_feats(image.shape, 3)
         dots_products = np.einsum('i..., i...', grads, spatial_feats)
         dots_products = flatten_first_dims(dots_products)
 
-        unfolded_feats = unfold(np.expand_dims(local_feats, 0), self.filter_size)
+        unfolded_feats = unfold(np.expand_dims(local_feats, 0), 3)
         unfolded_feats = flatten_first_dims(np.squeeze(unfolded_feats, 0))
 
         inner_feats = self.get_inner_feats(unfolded_feats, dots_products)
@@ -223,8 +222,6 @@ class CostProcessor:
         self.local_feats = local_feats
         self.inner_feats = inner_feats
         self.outer_feats = outer_feats
-
-        self.filter_size = np.array([3, 3])
 
     def compute(self, series):
         local_hist = self.get_hist(series, self.local_feats, self.local_weight)
