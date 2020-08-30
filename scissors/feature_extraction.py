@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Sequence
 from collections import deque
 from scipy.ndimage.filters import gaussian_filter1d
 from skimage.filters import gaussian, laplace, sobel_h, sobel_v, sobel
@@ -12,24 +13,29 @@ default_params = {
     'local': 0.1,
     'inner': 0.1,
     'outer': 0.1,
-    'maximum_cost': 1024,
+    'maximum_cost': 255,
+    'laplace_kernels': [3, 5, 7],
+    'gaussian_kernels': [5, 5, 5],
+    'laplace_weights': [0.2, 0.3, 0.4]
 }
 
 
 class StaticExtractor:
-    def __init__(self, laplace_kernel_size=3, gaussian_std=4, laplace_w=None, magnitude_w=None,
-                 direction_w=None, maximum_cost=None):
+    def __init__(self, laplace_kernels=None, laplace_weights=None, gaussian_kernels=None,
+                 laplace_w=None, magnitude_w=None, direction_w=None, maximum_cost=None):
         """
         Class for computing static features.
 
         Parameters
         ----------
-        laplace_kernel_size : int
-            defines the size of the laplace kernel
-        gaussian_std : float
+        laplace_kernels : Sequence[int]
+            defines the size of the laplace kernels.
+        gaussian_kernels : Sequence[int]
             standard deviation for gaussian kernel.
+        laplace_weights : Sequence[float]
+            defines strength of different laplace filters
         laplace_w : float
-            weight of laplacian zero-crossing  features
+            weight of laplace zero-crossing  features
         magnitude_w : float
             weight of gradient magnitude features
         direction_w : float
@@ -37,37 +43,33 @@ class StaticExtractor:
         maximum_cost : float
            specifies the largest possible integer cost
         """
-        if laplace_w is None:
-            laplace_w = default_params['laplace']
-
-        if magnitude_w is None:
-            magnitude_w = default_params['magnitude']
-
-        if direction_w is None:
-            direction_w = default_params['direction']
-
-        if maximum_cost is None:
-            maximum_cost = default_params['maximum_cost']
+        laplace_w = laplace_w or default_params['laplace']
+        magnitude_w = magnitude_w or default_params['magnitude']
+        direction_w = direction_w or default_params['direction']
+        maximum_cost = maximum_cost or default_params['maximum_cost']
 
         self.maximum_cost = maximum_cost
         self.laplace_w = laplace_w * maximum_cost
         self.magnitude_w = magnitude_w * maximum_cost
         self.direction_w = direction_w * maximum_cost
 
-        self.gaussian_std = gaussian_std
-        self.laplace_kernel_sz = laplace_kernel_size
-        self.filter_size = np.array([3, 3])
+        self.laplace_weights = laplace_weights or default_params['laplace_weights']
+        self.laplace_kernels = laplace_kernels or default_params['laplace_kernels']
+        self.gaussian_kernels = gaussian_kernels or default_params['gaussian_kernels']
 
-    def __call__(self, image):
+        assert len(self.laplace_weights) == len(self.laplace_kernels) == len(self.gaussian_kernels), \
+            "Sequences must have equal length."
+
+    def __call__(self, image: np.array):
         return self.get_total_link_costs(image)
 
-    def get_total_link_costs(self, image):
-        l_cost = self.get_laplace_cost(image, self.laplace_kernel_sz, self.gaussian_std)
-        l_cost = unfold(l_cost, self.filter_size)
+    def get_total_link_costs(self, image: np.array):
+        l_cost = self.get_laplace_cost(image, self.laplace_kernels, self.gaussian_kernels, self.laplace_weights)
+        l_cost = unfold(l_cost, np.array([3, 3]))
         l_cost = np.ceil(self.laplace_w * l_cost)
 
         g_cost = self.get_magnitude_cost(image)
-        g_cost = unfold(g_cost, self.filter_size)
+        g_cost = unfold(g_cost, np.array([3, 3]))
         g_cost = np.ceil(self.magnitude_w * g_cost)
 
         d_cost = self.get_direction_cost(image)
@@ -75,40 +77,45 @@ class StaticExtractor:
         total_cost = np.squeeze(l_cost + g_cost + d_cost)
         return total_cost
 
+    def get_laplace_cost(self, image, laplace_kernels: Sequence, gaussian_kernels: Sequence, weights: Sequence):
+        total_cost = np.zeros((1,) + image.shape)
+        for laplace_kernel, gaussian_kernel, w in zip(laplace_kernels, gaussian_kernels, weights):
+            total_cost += w * self.calculate_single_laplace_cost(image, laplace_kernel, gaussian_kernel)
+        return total_cost
+
     @staticmethod
-    def get_laplace_cost(image, laplace_kernel_sz, gaussian_std):
-        # TODO add several kernels
-        output = np.ones_like(image)
-        blurred = gaussian(image, gaussian_std)
+    def calculate_single_laplace_cost(image: np.array, laplace_kernel_sz: int, gaussian_kernel: int):
+        blurred = gaussian(image, gaussian_kernel)
         laplace_map = laplace(blurred, ksize=laplace_kernel_sz)
-
-        unfolded_map = unfold(
-            np.expand_dims(laplace_map, 0),
-            np.array([laplace_kernel_sz, laplace_kernel_sz])
-        )
-        unfolded_map = flatten_first_dims(np.squeeze(unfolded_map))
-        n_positive = np.sum(unfolded_map >= 0, axis=0)
-        n_negative = np.sum(unfolded_map < 0, axis=0)
-
-        zero_crossing_mask = ((n_negative > 0) & (n_positive > 0))
-        output[zero_crossing_mask] = 0
-        return np.expand_dims(output, 0)
+        laplace_map = np.expand_dims(laplace_map, 0)
+        # create map of neighbouring pixels costs
+        cost_map = unfold(laplace_map, np.array([laplace_kernel_sz, laplace_kernel_sz]))
+        cost_map = flatten_first_dims(np.squeeze(cost_map))
+        # leave only direct neighbours
+        cost_map = cost_map[[1, 3, 5, 7], :, :]
+        # get max elements with the opposite sign
+        signs = np.sign(laplace_map)
+        opposites = cost_map * (cost_map * signs < 0)
+        opposites = np.max(np.abs(opposites), axis=0)
+        output = np.abs(laplace_map) > opposites
+        return output
 
     @staticmethod
-    def get_magnitude_cost(image):
+    def get_magnitude_cost(image: np.array):
         grads = sobel(image)
         cost = 1 - grads / np.max(grads)
         cost = np.expand_dims(cost, 0)
         return cost
 
-    def get_direction_cost(self, image, eps=1e-6):
+    @staticmethod
+    def get_direction_cost(image: np.array, eps=1e-6):
         grads = np.stack([sobel_v(image), -sobel_h(image)])
         grads /= (np.linalg.norm(grads, axis=0) + eps)
 
-        unfolded_grads = unfold(grads, self.filter_size)
+        unfolded_grads = unfold(grads, np.array([3, 3]))
         grads = grads[:, None, None, ...]
 
-        spatial_feats = create_spatial_feats(image.shape, self.filter_size)
+        spatial_feats = create_spatial_feats(image.shape, np.array([3, 3]))
         link_feats = np.einsum('i..., i...', spatial_feats, grads)
         local_feats = np.abs(link_feats)
 
