@@ -179,13 +179,13 @@ def search(long [:, :, :, :]static_cost, long [:, :, :, :] dynamic_cost,
                 list_index = q[0].total_cost % maximum_local_cost
                 list_push(q, &active_list[0][list_index])
 
-                values = [q.total_cost]
-                while q.next != NULL:
-                    q = q.next
-                    values.append(q.total_cost)
-
-                if len(set(values)) != 1:
-                    print(list_index)
+                # values = [q.total_cost]
+                # while q.next != NULL:
+                #     q = q.next
+                #     values.append(q.total_cost)
+                #
+                # if len(set(values)) != 1:
+                #     print(list_index)
 
                 # set back pointer
                 next_node_map[0, q_x, q_y] = p_x

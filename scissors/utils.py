@@ -3,7 +3,7 @@ from typing import Sequence, Union
 from itertools import product
 
 
-def unfold(x: np.array, filter_size: Union[int, np.array]):
+def unfold(x: np.array, filter_size: Union[int, np.array] = 3):
     feature_size, *spatial = x.shape
     if isinstance(filter_size, int):
         filter_size = np.array((filter_size,) * len(spatial))
@@ -36,7 +36,7 @@ def unfold(x: np.array, filter_size: Union[int, np.array]):
     return unfolded
 
 
-def create_spatial_feats(shape: Sequence[int], filter_size: Union[int, np.array], feature_size: int = 2):
+def create_spatial_feats(shape: Sequence[int], filter_size: Union[int, np.array] = 3, feature_size: int = 2):
     if isinstance(filter_size, int):
         filter_size = np.array((filter_size,) * len(shape))
 
@@ -63,15 +63,6 @@ def create_spatial_feats(shape: Sequence[int], filter_size: Union[int, np.array]
 def flatten_first_dims(x, n_dims=2):
     shape = x.shape
     return np.reshape(x, ((np.product(shape[:n_dims]),) + shape[n_dims:]))
-
-
-def norm_by_max_value(feats, max_val):
-    feats = feats / np.max(feats)
-    return max_val * feats
-
-
-def get_static_cost(u, v, edge, prev_edge):
-    return edge
 
 
 def quadratic_kernel(x, size):

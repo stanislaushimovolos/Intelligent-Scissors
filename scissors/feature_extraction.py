@@ -1,10 +1,12 @@
+import time
 import numpy as np
+
 from typing import Sequence
 from collections import deque
 from scipy.ndimage.filters import gaussian_filter1d
 from skimage.filters import gaussian, laplace, sobel_h, sobel_v, sobel
 
-from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, norm_by_max_value, quadratic_kernel
+from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, quadratic_kernel
 
 default_params = {
     'laplace': 0.3,
@@ -61,7 +63,7 @@ class StaticExtractor:
 
     def get_static_costs(self, image: np.array):
         l_cost = self.get_laplace_cost(image, self.laplace_kernels, self.gaussian_kernels, self.laplace_weights)
-        l_cost = unfold(l_cost, 3)
+        l_cost = unfold(l_cost)
         l_cost = np.ceil(self.laplace_w * l_cost)
 
         d_cost = self.get_direction_cost(image)
@@ -79,9 +81,9 @@ class StaticExtractor:
     def calculate_single_laplace_cost(image: np.array, laplace_kernel_sz: int, gaussian_kernel: int):
         blurred = gaussian(image, gaussian_kernel)
         laplace_map = laplace(blurred, ksize=laplace_kernel_sz)
-        laplace_map = np.expand_dims(laplace_map, 0)
+        laplace_map = laplace_map[None]
         # create map of neighbouring pixels costs
-        cost_map = unfold(laplace_map, np.array([laplace_kernel_sz, laplace_kernel_sz]))
+        cost_map = unfold(laplace_map, laplace_kernel_sz)
         cost_map = flatten_first_dims(np.squeeze(cost_map))
         # leave only direct neighbours
         cost_map = cost_map[[1, 3, 5, 7], :, :]
@@ -97,10 +99,10 @@ class StaticExtractor:
         grads = np.stack([sobel_v(image), -sobel_h(image)])
         grads /= (np.linalg.norm(grads, axis=0) + eps)
 
-        unfolded_grads = unfold(grads, 3)
+        unfolded_grads = unfold(grads)
         grads = grads[:, None, None, ...]
 
-        spatial_feats = create_spatial_feats(image.shape, 3)
+        spatial_feats = create_spatial_feats(image.shape)
         link_feats = np.einsum('i..., i...', spatial_feats, grads)
         local_feats = np.abs(link_feats)
 
@@ -111,25 +113,25 @@ class StaticExtractor:
 
 
 def get_dynamic_features(image, n_values=255, eps=1e-6):
-    local_feats = norm_by_max_value(image, n_values)
+    local_feats = image / np.max(image)
 
     grads = -np.array([sobel_h(image), sobel_v(image)])
     grads /= (np.linalg.norm(grads) + eps)
     grads = grads[:, None, None, ...]
 
-    spatial_feats = create_spatial_feats(image.shape, 3)
-    dots_products = np.einsum('i..., i...', grads, spatial_feats)
-    dots_products = flatten_first_dims(dots_products)
+    spatial_feats = create_spatial_feats(image.shape)
+    dot_products = np.einsum('i..., i...', grads, spatial_feats)
+    dot_products = flatten_first_dims(dot_products)
 
-    unfolded_feats = unfold(np.expand_dims(local_feats, 0), 3)
+    unfolded_feats = unfold(local_feats[None])
     unfolded_feats = flatten_first_dims(np.squeeze(unfolded_feats, 0))
 
-    inner_feats = get_inner_feats(unfolded_feats, dots_products)
-    outer_feats = get_outer_feats(unfolded_feats, dots_products)
+    inner_feats = get_inner_feats(unfolded_feats, dot_products)
+    outer_feats = get_outer_feats(unfolded_feats, dot_products)
 
-    inner_feats = np.ceil(inner_feats).astype(np.int)
-    outer_feats = np.ceil(outer_feats).astype(np.int)
-    local_feats = np.ceil(local_feats).astype(np.int)
+    inner_feats = np.ceil((n_values - 1) * inner_feats).astype(np.int)
+    outer_feats = np.ceil((n_values - 1) * outer_feats).astype(np.int)
+    local_feats = np.ceil((n_values - 1) * local_feats).astype(np.int)
     return local_feats, inner_feats, outer_feats
 
 
@@ -193,22 +195,32 @@ class CostProcessor:
         self.n_image_values = n_image_values
         self.n_magnitude_values = n_magnitude_values
 
-        self.magnitude_feats = get_magnitude_features(gaussian(image, self.image_std), self.n_magnitude_values)
+        smoothed = gaussian(image, self.image_std)
+        self.magnitude_feats = get_magnitude_features(smoothed, self.n_magnitude_values)
         self.local_feats, self.inner_feats, self.outer_feats \
-            = get_dynamic_features(image, self.n_image_values)
+            = get_dynamic_features(smoothed, self.n_image_values)
 
     def compute(self, series):
-        # local_hist = self.get_hist(series, self.local_feats, self.local_weight, self.n_image_values)
-        # inner_hist = self.get_hist(series, self.inner_feats, self.inner_weight, self.n_image_values)
-        # outer_hist = self.get_hist(series, self.outer_feats, self.outer_weight, self.n_image_values)
+        local_hist = self.get_hist(
+            series, self.local_feats, self.local_weight,
+            self.n_image_values, self.hist_std
+        )
+        inner_hist = self.get_hist(
+            series, self.inner_feats, self.inner_weight,
+            self.n_image_values, self.hist_std
+        )
+        outer_hist = self.get_hist(
+            series, self.outer_feats, self.outer_weight,
+            self.n_image_values, self.hist_std
+        )
         magnitude_hist = self.get_hist(
             series, self.magnitude_feats, self.magnitude_weight,
             self.n_magnitude_values, self.hist_std
         )
-        # local_cost = local_hist[self.local_feats]
-        # inner_cost = inner_hist[self.inner_feats]
-        # outer_cost = outer_hist[self.outer_feats]
-        # local_cost + inner_cost + outer_cost
+
+        inner_cost = inner_hist[self.inner_feats]
+        outer_cost = outer_hist[self.outer_feats]
+        local_cost = local_hist[self.local_feats]
 
         magnitude_cost = magnitude_hist[self.magnitude_feats]
         neighbour_weights = np.array([
@@ -217,10 +229,15 @@ class CostProcessor:
             [1, 0.707, 1]])
 
         neighbour_weights = neighbour_weights[None, :, :, None, None]
-        magnitude_cost = unfold(magnitude_cost[None], 3)
-        magnitude_cost = (neighbour_weights * magnitude_cost).squeeze(0)
+        magnitude_cost = unfold(magnitude_cost[None])
+        magnitude_cost = (neighbour_weights * magnitude_cost)
 
-        total_cost = (magnitude_cost + 0).astype(np.int)
+        # TODO: make it faster, i.e use cython
+        local_cost = unfold(local_cost[None])
+        inner_cost = unfold(inner_cost[None])
+        outer_cost = unfold(outer_cost[None])
+
+        total_cost = (magnitude_cost + local_cost + inner_cost + outer_cost).squeeze(0).astype(np.int)
         return total_cost
 
     @staticmethod
@@ -255,9 +272,11 @@ class Scissors:
         self.processed_pixels = deque(maxlen=self.capacity)
 
     def find_path(self, seed_x, seed_y, free_x, free_y):
+        # start = time.time()
         if len(self.processed_pixels) != 0:
             self.current_dynamic_cost = self.processor.compute(self.processed_pixels)
 
         path = self.path_finder.find_path(seed_x, seed_y, free_x, free_y, self.current_dynamic_cost)
         self.processed_pixels.extend(path)
+        # print(time.time() - start)
         return path
