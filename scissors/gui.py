@@ -4,7 +4,7 @@ from tkinter import *
 from PIL import ImageTk, Image
 
 from scissors.graph import PathFinder
-from scissors.feature_extraction import StaticExtractor, DynamicExtractor, Scissors
+from scissors.feature_extraction import StaticExtractor, CostProcessor, Scissors
 
 
 class Model:
@@ -138,11 +138,10 @@ def run_demo(file_name):
 
     static_extractor = StaticExtractor()
     static_cost = static_extractor(gray_scaled)
-    finder = PathFinder(static_cost, static_extractor.maximum_cost)
 
-    dynamic_extractor = DynamicExtractor()
-    dynamic_features = dynamic_extractor(gray_scaled)
-    scissors = Scissors(static_cost, dynamic_features, finder)
+    finder = PathFinder(static_cost, static_extractor.maximum_cost)
+    cost_processor = CostProcessor(gray_scaled)
+    scissors = Scissors(static_cost, cost_processor, finder)
 
     root = Tk()
     stage = Canvas(root, bg="black", width=w, height=h)

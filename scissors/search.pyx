@@ -71,7 +71,7 @@ cdef vector[vector[Node]]* make_node_storage(int w, int h):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
+def search(long [:, :, :, :]static_cost, long [:, :, :, :] dynamic_cost,
             int w, int h, int seed_x, int seed_y, int maximum_local_cost):
 
     # keeps information about all pixels
@@ -160,8 +160,7 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
             # compute cumulative cost to neighbour
             # TODO fix axes order
             tmp_cost = p[0].total_cost + static_cost[y_shift + 1, x_shift + 1, p_y, p_x]
-            # TODO smth wrong with dynamic features
-            # tmp_cost += dynamic_cost[q_y, q_x]
+            tmp_cost += dynamic_cost[y_shift + 1, x_shift + 1, p_y, p_x]
 
             if q[0].active and (q[0].has_infinite_cost or tmp_cost < q[0].total_cost):
                 # remove higher cost neighbor
@@ -180,6 +179,14 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
                 list_index = q[0].total_cost % maximum_local_cost
                 list_push(q, &active_list[0][list_index])
 
+                values = [q.total_cost]
+                while q.next != NULL:
+                    q = q.next
+                    values.append(q.total_cost)
+
+                if len(set(values)) != 1:
+                    print(list_index)
+
                 # set back pointer
                 next_node_map[0, q_x, q_y] = p_x
                 next_node_map[1, q_x, q_y] = p_y
@@ -187,6 +194,8 @@ def search(long [:, :, :, :]static_cost, long [:, :] dynamic_cost,
                 # increase number of active buckets
                 if active_list[0][list_index].size == 1:
                     num_of_active_lists += 1
+
+
 
     del raw_storage
     del active_list
