@@ -1,4 +1,3 @@
-import time
 import numpy as np
 
 from typing import Sequence
@@ -8,14 +7,25 @@ from skimage.filters import gaussian, laplace, sobel_h, sobel_v, sobel
 from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, quadratic_kernel
 
 default_params = {
-    'laplace': 0.3,
-    'direction': 0.3,
-    'magnitude': 0.25,
-    'local': 0.15,
-    'maximum_cost': 512,
+    # static params
+    'laplace': 0.4,
+    'direction': 0.2,
+    'magnitude': 0.3,
+    'local': 0.1,
     'laplace_kernels': [3, 5, 7],
     'gaussian_kernels': [5, 5, 5],
-    'laplace_weights': [0.2, 0.3, 0.4]
+    'laplace_weights': [0.2, 0.3, 0.5],
+
+    # dynamic params
+    'hist_std': 2,
+    'image_std': 1,
+    'history_capacity': 16,
+    'n_image_values': 255,
+    'n_magnitude_values': 255,
+
+    # other params
+    'maximum_cost': 512,
+    'snap_scale': 3
 }
 
 
@@ -56,22 +66,13 @@ class StaticExtractor:
             "Sequences must have equal length."
 
     def __call__(self, image: np.array, brightness: np.array):
-        # start = time.time()
-        # prepare = time.time() - start
-        # print('Prepare - ', prepare)
-        # start = time.time()
-
         l_cost = self.get_laplace_cost(image, self.laplace_kernels, self.gaussian_kernels, self.laplace_weights)
         l_cost = unfold(l_cost)
         l_cost = np.ceil(self.laplace_w * l_cost)
 
-        # print('Laplace - ', time.time() - start)
-        # start = time.time()
-
         d_cost = self.get_direction_cost(brightness)
         d_cost = np.ceil(self.direction_w * d_cost)
         total_cost = np.squeeze(l_cost + d_cost)
-        # print('Direction - ', time.time() - start)
         return total_cost
 
     def get_laplace_cost(self, image, laplace_kernels: Sequence, gaussian_kernels: Sequence, weights: Sequence):
@@ -121,8 +122,9 @@ class StaticExtractor:
 
 
 class CostProcessor:
-    def __init__(self, image: np.array, brightness: np.array, hist_std=2, image_std=2, n_image_values=255,
-                 n_magnitude_values=324, magnitude_w=None, inner_w=None, outer_w=None, local_w=None, maximum_cost=None):
+    def __init__(self, image: np.array, brightness: np.array, hist_std=None, image_std=None, n_image_values=None,
+                 n_magnitude_values=None, magnitude_w=None, inner_w=None, outer_w=None, local_w=None,
+                 maximum_cost=None):
         """
         Class for computing dynamic features histograms.
 
@@ -148,6 +150,11 @@ class CostProcessor:
 
         # inner_w = inner_w or default_params['inner']
         # outer_w = outer_w or default_params['outer']
+        hist_std = hist_std or default_params['hist_std']
+        image_std = image_std or default_params['image_std']
+        n_image_values = n_image_values or default_params['n_image_values']
+        n_magnitude_values = n_magnitude_values or default_params['n_magnitude_values']
+
         local_w = local_w or default_params['local']
         magnitude_w = magnitude_w or default_params['magnitude']
         maximum_cost = maximum_cost or default_params['maximum_cost']
@@ -162,6 +169,7 @@ class CostProcessor:
         self.n_image_values = n_image_values
         self.n_magnitude_values = n_magnitude_values
 
+        self.brightness = brightness
         self.magnitude_feats = self.get_magnitude_features(image, self.n_magnitude_values, self.image_std)
         self.local_feats = self.get_local_features(gaussian(brightness, self.image_std), self.n_image_values)
 
@@ -253,7 +261,7 @@ class CostProcessor:
 
 
 class Scissors:
-    def __init__(self, static_cost, dynamic_processor, finder, capacity=32):
+    def __init__(self, static_cost, dynamic_processor, finder, capacity=None):
         """
         Parameters
         ----------
@@ -264,21 +272,33 @@ class Scissors:
         capacity : int
             number of last pixels used for dynamic cost calculation
         """
-        self.capacity = capacity
+        self.capacity = capacity or default_params['history_capacity']
         self.path_finder = finder
         self.static_cost = static_cost
 
         self.current_dynamic_cost = None
         self.processor = dynamic_processor
+        self.grads_map = sobel(dynamic_processor.brightness)
         self.processed_pixels = list()
 
     def find_path(self, seed_x, seed_y, free_x, free_y):
         if len(self.processed_pixels) != 0:
             self.current_dynamic_cost = self.processor.compute(self.processed_pixels)
 
+        free_x, free_y = self.get_cursor_snap_point(free_x, free_y, self.grads_map)
         path = self.path_finder.find_path(seed_x, seed_y, free_x, free_y, self.current_dynamic_cost)
         self.processed_pixels.extend(reversed(path))
 
         if len(self.processed_pixels) > self.capacity:
             self.processed_pixels = self.processed_pixels[-self.capacity:]
         return path
+
+    @staticmethod
+    def get_cursor_snap_point(x, y, grads: np.array, snap_scale: int = 3):
+        region = grads[y - snap_scale:y + snap_scale, x - snap_scale:x + snap_scale]
+
+        max_grad_idx = np.unravel_index(region.argmax(), region.shape)
+        max_grad_idx = np.array(max_grad_idx)
+
+        y, x = max_grad_idx + np.array([y - snap_scale, x - snap_scale])
+        return x, y

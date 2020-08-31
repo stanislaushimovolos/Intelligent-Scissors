@@ -56,8 +56,8 @@ class PolyController:
     def __init__(self, model):
         self.model = model
 
-    def on_click(self, event):
-        self.model.add_point((event.x, event.y))
+    def on_click(self, x, y):
+        self.model.add_point((x, y))
 
     @property
     def canvas(self):
@@ -119,16 +119,20 @@ class GuiManager:
 
     def on_click(self, e):
         self.prev_click = self.cur_click
-        self.cur_click = np.flip((e.x, e.y))
-        self.c.on_click(e)
+        self.cur_click = (e.y, e.x)
 
+        new_circle_coords = (e.x, e.y)
         if self.prev_click is not None:
             seed_y, seed_x = self.prev_click
             free_y, free_x = self.cur_click
 
             path = self.scissors.find_path(seed_x, seed_y, free_x, free_y)
             path = [np.flip(x) for x in path]
+
             self.pixel_model.add_pixels(path)
+            new_circle_coords = path[0]
+
+        self.c.on_click(*new_circle_coords)
 
 
 def run_demo(file_name):
