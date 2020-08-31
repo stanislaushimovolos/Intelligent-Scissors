@@ -1,3 +1,4 @@
+import skimage
 import numpy as np
 from typing import Sequence, Union
 from itertools import product
@@ -58,6 +59,18 @@ def create_spatial_feats(shape: Sequence[int], filter_size: Union[int, np.array]
             holder[slices] /= np.linalg.norm(shift)
 
     return holder
+
+
+def preprocess_image(image: np.array):
+    if len(image.shape) == 2:
+        brightness = image
+        image = np.expand_dims(image, 0)
+    elif len(image.shape) == 3 and image.shape[2] == 3:
+        brightness = skimage.color.rgb2hsv(image)[:, :, 2]
+        image = np.transpose(image, (2, 0, 1))
+    else:
+        raise RuntimeError
+    return image, brightness
 
 
 def flatten_first_dims(x, n_dims=2):

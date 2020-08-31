@@ -1,3 +1,4 @@
+import time
 import numpy as np
 
 from typing import Sequence
@@ -9,9 +10,9 @@ from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, qua
 default_params = {
     'laplace': 0.3,
     'direction': 0.3,
-    'magnitude': 0.2,
-    'local': 0.2,
-    'maximum_cost': 255,
+    'magnitude': 0.25,
+    'local': 0.15,
+    'maximum_cost': 512,
     'laplace_kernels': [3, 5, 7],
     'gaussian_kernels': [5, 5, 5],
     'laplace_weights': [0.2, 0.3, 0.4]
@@ -54,23 +55,34 @@ class StaticExtractor:
         assert len(self.laplace_weights) == len(self.laplace_kernels) == len(self.gaussian_kernels), \
             "Sequences must have equal length."
 
-    def __call__(self, image: np.array):
-        return self.get_static_costs(image)
+    def __call__(self, image: np.array, brightness: np.array):
+        # start = time.time()
+        # prepare = time.time() - start
+        # print('Prepare - ', prepare)
+        # start = time.time()
 
-    def get_static_costs(self, image: np.array):
         l_cost = self.get_laplace_cost(image, self.laplace_kernels, self.gaussian_kernels, self.laplace_weights)
         l_cost = unfold(l_cost)
         l_cost = np.ceil(self.laplace_w * l_cost)
 
-        d_cost = self.get_direction_cost(image)
+        # print('Laplace - ', time.time() - start)
+        # start = time.time()
+
+        d_cost = self.get_direction_cost(brightness)
         d_cost = np.ceil(self.direction_w * d_cost)
         total_cost = np.squeeze(l_cost + d_cost)
+        # print('Direction - ', time.time() - start)
         return total_cost
 
     def get_laplace_cost(self, image, laplace_kernels: Sequence, gaussian_kernels: Sequence, weights: Sequence):
-        total_cost = np.zeros((1,) + image.shape)
-        for laplace_kernel, gaussian_kernel, w in zip(laplace_kernels, gaussian_kernels, weights):
-            total_cost += w * self.calculate_single_laplace_cost(image, laplace_kernel, gaussian_kernel)
+        n_channels, *shape = image.shape
+        total_cost = np.zeros((n_channels,) + tuple(shape))
+
+        for i, channel in enumerate(image):
+            for laplace_kernel, gaussian_kernel, w in zip(laplace_kernels, gaussian_kernels, weights):
+                total_cost[i] = w * self.calculate_single_laplace_cost(channel, laplace_kernel, gaussian_kernel)
+
+        total_cost = np.max(total_cost, axis=0, keepdims=True)
         return total_cost
 
     @staticmethod
@@ -79,7 +91,7 @@ class StaticExtractor:
         laplace_map = laplace(blurred, ksize=laplace_kernel_sz)
         laplace_map = laplace_map[None]
         # create map of neighbouring pixels costs
-        cost_map = unfold(laplace_map, laplace_kernel_sz)
+        cost_map = unfold(laplace_map)
         cost_map = flatten_first_dims(np.squeeze(cost_map))
         # leave only direct neighbours
         cost_map = cost_map[[1, 3, 5, 7], :, :]
@@ -109,8 +121,8 @@ class StaticExtractor:
 
 
 class CostProcessor:
-    def __init__(self, image: np.array, hist_std=2, image_std=2, n_image_values=255, n_magnitude_values=196,
-                 magnitude_w=None, inner_w=None, outer_w=None, local_w=None, maximum_cost=None):
+    def __init__(self, image: np.array, brightness: np.array, hist_std=2, image_std=2, n_image_values=255,
+                 n_magnitude_values=324, magnitude_w=None, inner_w=None, outer_w=None, local_w=None, maximum_cost=None):
         """
         Class for computing dynamic features histograms.
 
@@ -150,9 +162,8 @@ class CostProcessor:
         self.n_image_values = n_image_values
         self.n_magnitude_values = n_magnitude_values
 
-        smoothed = gaussian(image, self.image_std)
-        self.magnitude_feats = get_magnitude_features(smoothed, self.n_magnitude_values)
-        self.local_feats = get_local_features(smoothed, self.n_image_values)
+        self.magnitude_feats = self.get_magnitude_features(image, self.n_magnitude_values, self.image_std)
+        self.local_feats = self.get_local_features(gaussian(brightness, self.image_std), self.n_image_values)
 
     def compute(self, series):
         local_hist = self.get_hist(
@@ -187,51 +198,62 @@ class CostProcessor:
         hist = np.ceil(weight * (1 - hist / np.max(hist)))
         return hist
 
+    # TODO: implement other features
+    @staticmethod
+    def get_local_features(image, n_values, eps=1e-6):
+        local_feats = image / np.max(image)
 
-def get_local_features(image, n_values=255, eps=1e-6):
-    local_feats = image / np.max(image)
+        # grads = -np.array([sobel_h(image), sobel_v(image)])
+        # grads /= (np.linalg.norm(grads) + eps)
+        # grads = grads[:, None, None, ...]
 
-    # grads = -np.array([sobel_h(image), sobel_v(image)])
-    # grads /= (np.linalg.norm(grads) + eps)
-    # grads = grads[:, None, None, ...]
+        # spatial_feats = create_spatial_feats(image.shape)
+        # dot_products = np.einsum('i..., i...', grads, spatial_feats)
+        # dot_products = flatten_first_dims(dot_products)
+        #
+        # unfolded_feats = unfold(local_feats[None])
+        # unfolded_feats = flatten_first_dims(np.squeeze(unfolded_feats, 0))
 
-    # spatial_feats = create_spatial_feats(image.shape)
-    # dot_products = np.einsum('i..., i...', grads, spatial_feats)
-    # dot_products = flatten_first_dims(dot_products)
-    #
-    # unfolded_feats = unfold(local_feats[None])
-    # unfolded_feats = flatten_first_dims(np.squeeze(unfolded_feats, 0))
+        # def get_outer_feats(feats, dots_products):
+        #     indices = np.argmin(dots_products, axis=0).astype(np.int)
+        #     return np.choose(indices, feats)
+        #
+        #
+        # def get_inner_feats(feats, dots_products):
+        #     indices = np.argmax(dots_products, axis=0).astype(np.int)
+        #     return np.choose(indices, feats)
 
-    # def get_outer_feats(feats, dots_products):
-    #     indices = np.argmin(dots_products, axis=0).astype(np.int)
-    #     return np.choose(indices, feats)
-    #
-    #
-    # def get_inner_feats(feats, dots_products):
-    #     indices = np.argmax(dots_products, axis=0).astype(np.int)
-    #     return np.choose(indices, feats)
+        # inner_feats = get_inner_feats(unfolded_feats, dot_products)
+        # outer_feats = get_outer_feats(unfolded_feats, dot_products)
 
-    # inner_feats = get_inner_feats(unfolded_feats, dot_products)
-    # outer_feats = get_outer_feats(unfolded_feats, dot_products)
+        # inner_feats = np.ceil((n_values - 1) * inner_feats).astype(np.int)
+        # outer_feats = np.ceil((n_values - 1) * outer_feats).astype(np.int)
+        local_feats = np.ceil((n_values - 1) * local_feats).astype(np.int)
+        local_feats = unfold(local_feats[None]).astype(np.int)
+        return local_feats
 
-    # inner_feats = np.ceil((n_values - 1) * inner_feats).astype(np.int)
-    # outer_feats = np.ceil((n_values - 1) * outer_feats).astype(np.int)
-    local_feats = np.ceil((n_values - 1) * local_feats).astype(np.int)
-    local_feats = unfold(local_feats[None]).astype(np.int)
-    return local_feats
+    @staticmethod
+    def get_magnitude_features(image: np.array, n_values: int, std: float):
+        n_channels, *shape = image.shape
+        grads = np.zeros((n_channels,) + tuple(shape))
 
+        # process each RGB channel
+        for i, channel in enumerate(image):
+            channel = gaussian(channel, std)
+            grads[i] = sobel(channel)
 
-def get_magnitude_features(image: np.array, n_values: int):
-    grads = sobel(image)
-    grads = grads - np.min(grads)
-    cost = 1 - grads / np.max(grads)
-    cost = np.ceil((n_values - 1) * cost).astype(np.int)
-    cost = unfold(cost[None]).astype(int)
-    return cost
+        # choose maximum over the channels
+        grads = np.max(grads, axis=0, keepdims=True)
+        grads = grads - np.min(grads)
+
+        cost = 1 - grads / np.max(grads)
+        cost = np.ceil((n_values - 1) * cost).astype(np.int)
+        cost = unfold(cost).astype(int)
+        return cost
 
 
 class Scissors:
-    def __init__(self, static_cost, dynamic_processor, finder, capacity=16):
+    def __init__(self, static_cost, dynamic_processor, finder, capacity=32):
         """
         Parameters
         ----------

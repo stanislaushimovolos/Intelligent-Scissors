@@ -1,9 +1,9 @@
-import skimage
 import numpy as np
 from tkinter import *
 from PIL import ImageTk, Image
 
 from scissors.graph import PathFinder
+from scissors.utils import preprocess_image
 from scissors.feature_extraction import StaticExtractor, CostProcessor, Scissors
 
 
@@ -132,20 +132,22 @@ class GuiManager:
 
 
 def run_demo(file_name):
-    image = Image.open(file_name)
-    w, h = image.size
-    gray_scaled = skimage.color.rgb2gray(np.asarray(image))
+    image_raw = Image.open(file_name)
+    w, h = image_raw.size
 
+    # to avoid doing this twice
+    image, brightness = preprocess_image(np.asarray(image_raw))
+    # get static cost map
     static_extractor = StaticExtractor()
-    static_cost = static_extractor(gray_scaled)
+    static_cost = static_extractor(image, brightness)
 
-    dynamic_processor = CostProcessor(gray_scaled)
+    dynamic_processor = CostProcessor(image, brightness)
     finder = PathFinder(static_cost, static_extractor.maximum_cost)
     scissors = Scissors(static_cost, dynamic_processor, finder)
 
     root = Tk()
     stage = Canvas(root, bg="black", width=w, height=h)
-    tk_image = ImageTk.PhotoImage(image)
+    tk_image = ImageTk.PhotoImage(image_raw)
     stage.create_image(0, 0, image=tk_image, anchor=NW)
 
     manager = GuiManager(stage, scissors)
