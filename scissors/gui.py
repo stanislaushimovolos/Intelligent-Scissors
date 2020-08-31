@@ -139,9 +139,9 @@ def run_demo(file_name):
     static_extractor = StaticExtractor()
     static_cost = static_extractor(gray_scaled)
 
+    dynamic_processor = CostProcessor(gray_scaled)
     finder = PathFinder(static_cost, static_extractor.maximum_cost)
-    cost_processor = CostProcessor(gray_scaled)
-    scissors = Scissors(static_cost, cost_processor, finder)
+    scissors = Scissors(static_cost, dynamic_processor, finder)
 
     root = Tk()
     stage = Canvas(root, bg="black", width=w, height=h)

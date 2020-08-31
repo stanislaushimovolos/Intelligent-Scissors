@@ -1,4 +1,3 @@
-import time
 import numpy as np
 from .search import search
 
@@ -14,7 +13,7 @@ class PathFinder:
         if dynamic_cost is None:
             dynamic_cost = np.zeros((3, 3, h, w), dtype=np.int)
 
-        start = time.time()
+        # start = time.time()
         node_map = search(self.cost, dynamic_cost, w, h, seed_x, seed_y, self.maximum_cost)
 
         cur_x, cur_y = node_map[:, free_x, free_y]
@@ -24,5 +23,5 @@ class PathFinder:
             history.append((cur_y, cur_x))
             cur_x, cur_y = node_map[:, cur_x, cur_y]
 
-        #print(time.time() - start)
+        # print(time.time() - start)
         return history
