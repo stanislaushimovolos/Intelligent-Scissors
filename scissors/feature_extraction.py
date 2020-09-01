@@ -8,10 +8,12 @@ from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, qua
 
 default_params = {
     # static params
-    'laplace': 0.4,
+    'laplace': 0.3,
     'direction': 0.2,
-    'magnitude': 0.3,
+    'magnitude': 0.2,
     'local': 0.1,
+    'inner': 0.1,
+    'outer': 0.1,
     'laplace_kernels': [3, 5, 7],
     'gaussian_kernels': [5, 5, 5],
     'laplace_weights': [0.2, 0.3, 0.5],
@@ -19,12 +21,13 @@ default_params = {
     # dynamic params
     'hist_std': 2,
     'image_std': 1,
+    'distance_value': 3,
     'history_capacity': 16,
     'n_image_values': 255,
     'n_magnitude_values': 255,
 
     # other params
-    'maximum_cost': 512,
+    'maximum_cost': 255,
     'snap_scale': 3
 }
 
@@ -122,9 +125,9 @@ class StaticExtractor:
 
 
 class CostProcessor:
-    def __init__(self, image: np.array, brightness: np.array, hist_std=None, image_std=None, n_image_values=None,
-                 n_magnitude_values=None, magnitude_w=None, inner_w=None, outer_w=None, local_w=None,
-                 maximum_cost=None):
+    def __init__(self, image: np.array, brightness: np.array, hist_std=None, image_std=None, distance_value=None,
+                 n_image_values=None, n_magnitude_values=None, magnitude_w=None, inner_w=None, outer_w=None,
+                 local_w=None, maximum_cost=None):
         """
         Class for computing dynamic features histograms.
 
@@ -134,6 +137,8 @@ class CostProcessor:
             input image
         hist_std : float
             standard deviation of gaussian kernel used for smoothing dynamic histograms
+        image_std: float
+        distance_value : int
         n_image_values : int
             defines a possible range of values of dynamic features
         magnitude_w : float
@@ -148,10 +153,12 @@ class CostProcessor:
             specifies the largest possible integer cost
         """
 
-        # inner_w = inner_w or default_params['inner']
-        # outer_w = outer_w or default_params['outer']
+        inner_w = inner_w or default_params['inner']
+        outer_w = outer_w or default_params['outer']
         hist_std = hist_std or default_params['hist_std']
         image_std = image_std or default_params['image_std']
+        distance_value = distance_value or default_params['distance_value']
+
         n_image_values = n_image_values or default_params['n_image_values']
         n_magnitude_values = n_magnitude_values or default_params['n_magnitude_values']
 
@@ -159,23 +166,33 @@ class CostProcessor:
         magnitude_w = magnitude_w or default_params['magnitude']
         maximum_cost = maximum_cost or default_params['maximum_cost']
 
-        # self.inner_weight = inner_w * maximum_cost
-        # self.outer_weight = outer_w * maximum_cost
+        self.inner_weight = inner_w * maximum_cost
+        self.outer_weight = outer_w * maximum_cost
         self.local_weight = local_w * maximum_cost
         self.magnitude_weight = magnitude_w * maximum_cost
 
         self.hist_std = hist_std
-        self.image_std = image_std
         self.n_image_values = n_image_values
         self.n_magnitude_values = n_magnitude_values
 
         self.brightness = brightness
-        self.magnitude_feats = self.get_magnitude_features(image, self.n_magnitude_values, self.image_std)
-        self.local_feats = self.get_local_features(gaussian(brightness, self.image_std), self.n_image_values)
+        self.magnitude_feats = self.get_magnitude_features(image, n_magnitude_values, image_std)
+
+        smoothed = gaussian(brightness, image_std)
+        self.local_feats = self.get_direct_pixel_feats(smoothed, n_image_values)
+        self.inner_feats, self.outer_feats = self.get_externals_pixel_feats(smoothed, n_image_values, distance_value)
 
     def compute(self, series):
         local_hist = self.get_hist(
             series, self.local_feats, self.local_weight,
+            self.n_image_values, self.hist_std
+        )
+        inner_hist = self.get_hist(
+            series, self.inner_feats, self.inner_weight,
+            self.n_image_values, self.hist_std
+        )
+        outer_hist = self.get_hist(
+            series, self.outer_feats, self.outer_weight,
             self.n_image_values, self.hist_std
         )
         magnitude_hist = self.get_hist(
@@ -184,6 +201,9 @@ class CostProcessor:
         )
 
         local_cost = local_hist[self.local_feats]
+        inner_cost = inner_hist[self.inner_feats]
+        outer_cost = outer_hist[self.outer_feats]
+
         magnitude_cost = magnitude_hist[self.magnitude_feats]
         neighbour_weights = np.array([
             [1, 0.707, 1],
@@ -192,7 +212,9 @@ class CostProcessor:
 
         neighbour_weights = neighbour_weights[None, :, :, None, None]
         magnitude_cost = (neighbour_weights * magnitude_cost)
-        total_cost = (magnitude_cost + local_cost).squeeze(0).astype(np.int)
+
+        total_cost = (magnitude_cost + local_cost + inner_cost + outer_cost)
+        total_cost = total_cost.squeeze(0).astype(np.int)
         return total_cost
 
     @staticmethod
@@ -206,39 +228,37 @@ class CostProcessor:
         hist = np.ceil(weight * (1 - hist / np.max(hist)))
         return hist
 
-    # TODO: implement other features
     @staticmethod
-    def get_local_features(image, n_values, eps=1e-6):
+    def get_direct_pixel_feats(image, n_values: int):
         local_feats = image / np.max(image)
-
-        # grads = -np.array([sobel_h(image), sobel_v(image)])
-        # grads /= (np.linalg.norm(grads) + eps)
-        # grads = grads[:, None, None, ...]
-
-        # spatial_feats = create_spatial_feats(image.shape)
-        # dot_products = np.einsum('i..., i...', grads, spatial_feats)
-        # dot_products = flatten_first_dims(dot_products)
-        #
-        # unfolded_feats = unfold(local_feats[None])
-        # unfolded_feats = flatten_first_dims(np.squeeze(unfolded_feats, 0))
-
-        # def get_outer_feats(feats, dots_products):
-        #     indices = np.argmin(dots_products, axis=0).astype(np.int)
-        #     return np.choose(indices, feats)
-        #
-        #
-        # def get_inner_feats(feats, dots_products):
-        #     indices = np.argmax(dots_products, axis=0).astype(np.int)
-        #     return np.choose(indices, feats)
-
-        # inner_feats = get_inner_feats(unfolded_feats, dot_products)
-        # outer_feats = get_outer_feats(unfolded_feats, dot_products)
-
-        # inner_feats = np.ceil((n_values - 1) * inner_feats).astype(np.int)
-        # outer_feats = np.ceil((n_values - 1) * outer_feats).astype(np.int)
         local_feats = np.ceil((n_values - 1) * local_feats).astype(np.int)
         local_feats = unfold(local_feats[None]).astype(np.int)
         return local_feats
+
+    @staticmethod
+    def get_externals_pixel_feats(image: np.array, n_values: int, k_distance: int, eps=1e-4):
+        h, w = image.shape
+        grads_map = np.array([sobel_h(image), sobel_v(image)])
+        grads_map = grads_map / (np.linalg.norm(grads_map, axis=0) + eps)
+
+        def get_shifted_feats(directions):
+            shifts = np.round(directions * k_distance).astype(np.int)
+            grid = np.stack(np.meshgrid(np.arange(h), np.arange(w), indexing='ij'))
+            coords = grid + shifts
+
+            coords[coords < 0] = 0
+            coords[:, :, -k_distance:] = np.clip(coords[:, :, -k_distance:], 0, w - 1)
+            coords[:, -k_distance:, :] = np.clip(coords[:, -k_distance:, :], 0, h - 1)
+
+            feats = image[coords[0].reshape(-1), coords[1].reshape(-1)].reshape(h, w)
+            feats = feats / (np.max(feats) + eps)
+            feats = np.ceil((n_values - 1) * feats)
+            feats = unfold(feats[None]).astype(np.int)
+            return feats
+
+        outer_feats = get_shifted_feats(grads_map)
+        inner_feats = get_shifted_feats(-grads_map)
+        return inner_feats, outer_feats
 
     @staticmethod
     def get_magnitude_features(image: np.array, n_values: int, std: float):
