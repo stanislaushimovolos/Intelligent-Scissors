@@ -6,7 +6,7 @@ import numpy as np
 
 extensions = [
     setuptools.Extension("scissors.search", ["scissors/search.pyx"],
-                         include_dirs=[np.get_include()],  language='c++'),
+                         include_dirs=[np.get_include()], language='c++'),
 ]
 
 with open('README.md', 'r') as fh:
