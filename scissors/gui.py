@@ -65,7 +65,7 @@ class PolyController:
 
 
 class PixelsView(View):
-    def __init__(self, model, fill_color="blue"):
+    def __init__(self, model, fill_color="yellow"):
         super().__init__(model)
         self.fill_color = fill_color
 
@@ -78,7 +78,7 @@ class PixelsView(View):
 
 
 class PolyView(View):
-    def __init__(self, model, draw_lines=False, fill_color="green", radius=3):
+    def __init__(self, model, draw_lines=False, fill_color="red", radius=3):
         super().__init__(model)
 
         self.radius = radius
