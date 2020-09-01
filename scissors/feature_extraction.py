@@ -1,10 +1,11 @@
 import numpy as np
 
-from typing import Sequence
+from typing import Sequence, Union
 from scipy.ndimage.filters import gaussian_filter1d
 from skimage.filters import gaussian, laplace, sobel_h, sobel_v, sobel
 
-from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, quadratic_kernel
+from scissors.search import search
+from scissors.utils import unfold, create_spatial_feats, flatten_first_dims, quadratic_kernel, preprocess_image
 
 # Parameters  depend ot the image size.
 # These parameters were selected for 512 x 512 images.
@@ -199,6 +200,9 @@ class CostProcessor:
         self.local_feats = self.get_direct_pixel_feats(smoothed, n_image_values)
         self.inner_feats, self.outer_feats = self.get_externals_pixel_feats(smoothed, n_image_values, distance_value)
 
+    def __call__(self, series: Sequence[tuple]) -> np.array:
+        return self.compute_dynamic_cost(series)
+
     def compute_dynamic_cost(self, series: Sequence[tuple]) -> np.array:
         # calculate histograms
         local_hist = self.get_hist(
@@ -301,37 +305,59 @@ class CostProcessor:
 
 
 class Scissors:
-    def __init__(self, static_cost, dynamic_processor, finder, capacity=None):
+    def __init__(self, image: np.array, capacity=None, use_dynamic_features=True):
         """
         Parameters
         ----------
-        static_cost : np.array
+        image : np.array
             array of shape (3, 3, height, width)
-        dynamic_processor : CostProcessor
-        finder : PathFinder
         capacity : int
             number of last pixels used for dynamic cost calculation
         """
+
+        image, brightness = preprocess_image(image)
+        static_extractor = StaticExtractor()
+        static_cost = static_extractor(image, brightness)
+
+        self.static_cost = static_cost.astype(np.int)
+        self.maximum_cost = static_extractor.maximum_cost
         self.capacity = capacity or default_params['history_capacity']
-        self.path_finder = finder
-        self.static_cost = static_cost
 
         self.current_dynamic_cost = None
-        self.processor = dynamic_processor
-        self.grads_map = sobel(dynamic_processor.brightness)
+        self.processor = CostProcessor(image, brightness) if use_dynamic_features else lambda x: None
+
+        self.grads_map = sobel(brightness)
         self.processed_pixels = list()
 
     def find_path(self, seed_x: int, seed_y: int, free_x: int, free_y: int) -> Sequence[tuple]:
         if len(self.processed_pixels) != 0:
-            self.current_dynamic_cost = self.processor.compute_dynamic_cost(self.processed_pixels)
+            self.current_dynamic_cost = self.processor(self.processed_pixels)
 
         free_x, free_y = self.get_cursor_snap_point(free_x, free_y, self.grads_map)
-        path = self.path_finder.find_path(seed_x, seed_y, free_x, free_y, self.current_dynamic_cost)
+        path = self.calculate_segment(
+            seed_x, seed_y, free_x, free_y,
+            self.maximum_cost, self.current_dynamic_cost, self.static_cost
+        )
         self.processed_pixels.extend(reversed(path))
-
         if len(self.processed_pixels) > self.capacity:
             self.processed_pixels = self.processed_pixels[-self.capacity:]
         return path
+
+    @staticmethod
+    def calculate_segment(seed_x: int, seed_y: int, free_x: int, free_y: int, maximum_cost: int,
+                          dynamic_cost: Union[np.array, None], static_cost: np.array) -> Sequence[tuple]:
+        h, w = static_cost.shape[2:]
+        if dynamic_cost is None:
+            dynamic_cost = np.zeros((3, 3, h, w), dtype=np.int)
+
+        node_map = search(static_cost, dynamic_cost, w, h, seed_x, seed_y, maximum_cost)
+        cur_x, cur_y = node_map[:, free_x, free_y]
+
+        history = []
+        while (cur_x, cur_y) != (seed_x, seed_y):
+            history.append((cur_y, cur_x))
+            cur_x, cur_y = node_map[:, cur_x, cur_y]
+        return history
 
     @staticmethod
     def get_cursor_snap_point(x: int, y: int, grads: np.array, snap_scale: int = 3):

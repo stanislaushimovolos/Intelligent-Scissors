@@ -2,8 +2,6 @@ import numpy as np
 from tkinter import *
 from PIL import ImageTk, Image
 
-from scissors.graph import PathFinder
-from scissors.utils import preprocess_image
 from scissors.feature_extraction import StaticExtractor, CostProcessor, Scissors
 
 
@@ -139,15 +137,7 @@ def run_demo(file_name):
     image_raw = Image.open(file_name)
     w, h = image_raw.size
 
-    # to avoid doing this twice
-    image, brightness = preprocess_image(np.asarray(image_raw))
-    # get static cost map
-    static_extractor = StaticExtractor()
-    static_cost = static_extractor(image, brightness)
-
-    dynamic_processor = CostProcessor(image, brightness)
-    finder = PathFinder(static_cost, static_extractor.maximum_cost)
-    scissors = Scissors(static_cost, dynamic_processor, finder)
+    scissors = Scissors(np.asarray(image_raw))
 
     root = Tk()
     stage = Canvas(root, bg="black", width=w, height=h)

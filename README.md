@@ -17,23 +17,15 @@ You can learn more about it in papers:
 
 To use in your program
 ```python
-from scissors.graph import PathFinder
-from scissors.feature_extraction import StaticExtractor, DynamicExtractor, Scissors
+
+from scissors.feature_extraction import Scissors
 
 image = ...
+scissors = Scissors(image)
 
-static_extractor = StaticExtractor()
-static_cost = static_extractor(image)
-
-dynamic_extractor = DynamicExtractor()
-dynamic_features = dynamic_extractor(image)
-
-finder = PathFinder(image.size, static_cost)
-scissors = Scissors(static_cost, dynamic_features, finder)
-
-seed_point = ...
-free_point = ...
-path = scissors.find_path(seed_point, free_point)
+seed_x, seed_y = ...
+free_x, free_y = ...
+path = scissors.find_path(seed_x, seed_y, free_x, free_y)
 ```
 
 Also you can run a simple demo
@@ -44,3 +36,16 @@ from scissors.gui import run_demo
 file_name = 'image.png'
 run_demo(file_name)
 ```
+
+## Details
+
+The current implementation includes 
+
+* Static features
+* Dynamic features
+* On-the-fly Training
+* Unrestricted graph search
+
+On-the-fly Training allows you to select a “good” initial-boundary segment. 
+However, this results in poor performance for new segments with different intensity/gradient magnitudes.
+To overcome this, first try selecting a small region of the new segment to create correct dynamic features. 
