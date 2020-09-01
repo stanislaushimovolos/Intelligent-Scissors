@@ -134,14 +134,14 @@ class GuiManager:
 
 
 def run_demo(file_name):
-    image_raw = Image.open(file_name)
-    w, h = image_raw.size
+    image_pil = Image.open(file_name)
+    w, h = image_pil.size
 
-    scissors = Scissors(np.asarray(image_raw))
+    scissors = Scissors(np.asarray(image_pil))
 
     root = Tk()
     stage = Canvas(root, bg="black", width=w, height=h)
-    tk_image = ImageTk.PhotoImage(image_raw)
+    tk_image = ImageTk.PhotoImage(image_pil)
     stage.create_image(0, 0, image=tk_image, anchor=NW)
 
     manager = GuiManager(stage, scissors)
