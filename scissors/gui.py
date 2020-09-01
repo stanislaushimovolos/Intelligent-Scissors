@@ -2,7 +2,7 @@ import numpy as np
 from tkinter import *
 from PIL import ImageTk, Image
 
-from scissors.feature_extraction import StaticExtractor, CostProcessor, Scissors
+from scissors.feature_extraction import Scissors
 
 
 class Model:
