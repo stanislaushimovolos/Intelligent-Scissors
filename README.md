@@ -41,6 +41,7 @@ run_demo(file_name)
 
 The current implementation includes 
 
+* Cursor snap
 * Static features
 * Dynamic features
 * On-the-fly Training
