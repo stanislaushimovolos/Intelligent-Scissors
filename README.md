@@ -49,4 +49,4 @@ The current implementation includes
 
 On-the-fly Training allows you to select a “good” initial-boundary segment. 
 However, this results in poor performance for new segments with different intensity/gradient magnitudes.
-To overcome this, first try selecting a small region of the new segment to create correct dynamic features. 
+To overcome this, you should first try to select a small region of the new segment to create correct dynamic features. 
